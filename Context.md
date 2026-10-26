@@ -6,6 +6,10 @@ Windows native app for a Thai-speaking user to understand RAM usage, identify OS
 
 Repository: `sanchatmd-dev/RamMx`. Working v0.1.0 preview, not a claim that every production gate in the blueprint has passed.
 
+## Paused checkpoint — 2026-10-27
+
+The user requested a checkpoint and stop. Do not resume implementation until asked. See `docs/CHECKPOINT.md` for the exact distinction between tested packaged code and pending changes.
+
 ## Stack and source map
 
 - .NET 10, C#, WPF; API contract target `net10.0-windows10.0.19041.0`, supported product target Windows 11 x64.

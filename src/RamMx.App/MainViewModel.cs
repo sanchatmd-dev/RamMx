@@ -51,6 +51,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private InstalledApp? selectedInstalled;
     private CacheRecipe? selectedRecipe;
     private DateTimeOffset lastPersist;
+    private DateTimeOffset lastReview;
+    private BackgroundCandidate? selectedReview;
+    public BackgroundCandidate? SelectedReview { get => selectedReview; set { selectedReview = value; Notify(); CommandManager.InvalidateRequerySuggested(); } }
     public UserSettings Settings { get; }
     public bool Busy { get => busy; private set { busy = value; Notify(); CommandManager.InvalidateRequerySuggested(); } }
     public int Page { get => page; set { page = value; Notify(); } }
@@ -103,6 +106,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public BulkObservableCollection<InstalledApp> Installed { get; } = [];
     public BulkObservableCollection<Recommendation> Recommendations { get; } = [];
     public BulkObservableCollection<Evidence> Evidence { get; } = [];
+    public BulkObservableCollection<BackgroundCandidate> BackgroundCandidates { get; } = [];
     public BulkObservableCollection<StartupEntry> Startup { get; } = [];
     public BulkObservableCollection<HistoryEntry> History { get; } = [];
     public BulkObservableCollection<CacheFile> CacheFiles { get; } = [];
@@ -118,6 +122,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public ICommand KeepCommand { get; }
     public ICommand CandidateCommand { get; }
     public ICommand InspectCommand { get; }
+    public ICommand InspectReviewCommand { get; }
     public ICommand ShowFileCommand { get; }
     public ICommand UninstallCommand { get; }
     public ICommand ScanCacheCommand { get; }
@@ -143,6 +148,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         KeepCommand = new Command(() => { if (SelectedGroup is { } g) { if (!Settings.KeepApps.Remove(g.AppKey)) Settings.KeepApps.Add(g.AppKey); SaveSettings(); ApplyFilter(); UpdateRecommendations(); } return Task.CompletedTask; }, () => !Busy && SelectedGroup != null);
         CandidateCommand = new Command(() => { if (SelectedGroup is { } g) { if (!Settings.ProfileCandidates.TryGetValue(Profile, out var list)) Settings.ProfileCandidates[Profile] = list = []; if (!list.Remove(g.AppKey)) list.Add(g.AppKey); SaveSettings(); UpdateRecommendations(); Status = "ปรับรายการไม่ใช้ในโปรไฟล์แล้ว — ไม่มีการปิดอัตโนมัติ"; } return Task.CompletedTask; }, () => !Busy && SelectedGroup != null);
         InspectCommand = new Command(() => RunAsync(InspectAsync), () => !Busy && SelectedGroup != null);
+        InspectReviewCommand = new Command(() => RunAsync(async () =>
+        {
+            var group = allGroups.FirstOrDefault(g => g.AppKey == SelectedReview?.AppKey);
+            if (group == null) { Status = "แอปจบไปแล้ว กรุณารอรายการใหม่"; return; }
+            SelectedGroup = group; await InspectAsync();
+        }), () => !Busy && SelectedReview != null);
         ShowFileCommand = new Command(() => RunAsync(() => { WindowsLinks.ShowFile(SelectedGroup!.Path); return Task.CompletedTask; }), () => !Busy && SelectedGroup?.Path.Length > 0);
         UninstallCommand = new Command(() => RunAsync(UninstallAsync), () => !Busy && SelectedInstalled is { CanUninstall: true });
         ScanCacheCommand = new Command(() => RunAsync(ScanCacheAsync), () => !Busy && SelectedRecipe != null);
@@ -177,6 +188,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (Busy && !force) return; // A command may have opened its confirmation while this sample was in flight.
             snapshot = data.Item1;
             allGroups = TelemetryService.Group(data.Item2, Settings); ApplyFilter(); behaviour.Observe(snapshot.Timestamp, allGroups);
+            if (snapshot.Timestamp - lastReview >= TimeSpan.FromSeconds(10))
+            {
+                var key = SelectedReview?.AppKey;
+                Replace(BackgroundCandidates, BackgroundReview.Evaluate(allGroups, behaviour, snapshot.Timestamp));
+                SelectedReview = BackgroundCandidates.FirstOrDefault(c => c.AppKey == key); lastReview = snapshot.Timestamp;
+            }
             chart.Enqueue(snapshot.AvailablePercent); while (chart.Count > Math.Max(2, 60 / Settings.RefreshSeconds)) chart.Dequeue(); Chart = chart.ToArray();
             if (snapshot.Timestamp - lastPersist > TimeSpan.FromMinutes(1)) { store.Record(snapshot); lastPersist = snapshot.Timestamp; }
             foreach (var property in new[] { nameof(Available), nameof(Usable), nameof(Commit), nameof(CommitLimit), nameof(DiskFree), nameof(DiskDetail), nameof(UsedPercent), nameof(MemoryLabel), nameof(ProcessSummary), nameof(Chart), nameof(ChartCaption) }) Notify(property);
