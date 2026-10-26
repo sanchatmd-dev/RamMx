@@ -1,0 +1,14 @@
+.tools/
+.local/
+artifacts/
+**/bin/
+**/obj/
+.vs/
+TestResults/
+*.user
+*.db
+*.db-shm
+*.db-wal
+docs/*.th.md
+*.pfx
+*.cer

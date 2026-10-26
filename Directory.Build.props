@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Deterministic>true</Deterministic>
+    <Version>0.1.0</Version>
+    <Authors>RamMx contributors</Authors>
+    <Company>RamMx</Company>
+    <Product>RamMx</Product>
+    <Copyright>Copyright (c) 2026 RamMx contributors</Copyright>
+  </PropertyGroup>
+</Project>
