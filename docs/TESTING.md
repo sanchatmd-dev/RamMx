@@ -4,7 +4,7 @@ Test host: Windows 11 Home x64, .NET SDK 10.0.403. Results describe this host, n
 
 ## Automated checks
 
-`./scripts/build.ps1 -Publish` restores the solution, builds Release, runs xUnit integration tests and publishes a self-contained win-x64 ZIP. Local results: **52 passed, 0 failed, 0 skipped**. Release compilation: **0 warnings, 0 errors**. TRX output is in `tests/RamMx.Tests/TestResults/` and uploaded by CI.
+`./scripts/build.ps1 -Publish` restores the solution, builds Release, runs xUnit integration tests and publishes a self-contained win-x64 ZIP. Local results: **53 passed, 0 failed, 0 skipped**. Release compilation: **0 warnings, 0 errors**. TRX output is in `tests/RamMx.Tests/TestResults/` and uploaded by CI.
 
 Coverage includes:
 
@@ -17,12 +17,13 @@ Coverage includes:
 - Disposable cache trees: selected deletion, personal data preservation, replaced/modified/locked files, new files after preview, outside-root attempts and hard links.
 - Uninstaller command parsing, broker request expiry/nonce/payload/operation validation and unsigned executable evidence.
 - GUID-named Windows SystemApps protection, path-prefix boundaries, shared components and non-finite settings values.
+- Incremental process row updates preserve identity, refresh action policy and avoid redundant display notifications.
 
 `dotnet list RamMx.sln package --vulnerable --include-transitive` reported no known vulnerable packages in the checked dependency graph. This is an advisory lookup, not a guarantee of vulnerability-free software.
 
 ## Native UI smoke checks
 
-Opened the published native Windows executable and inspected rendered screens and accessibility trees. Overview metrics/graph, process table/actions, installed applications and cache page rendered. Fixed title contrast, dark combo styling and window sizing/scrolling discovered during these checks. Read-only inventory exposed a GUID-named SystemApps package; added a location-based protection rule and regression tests.
+Opened the published native Windows executable and inspected rendered screens and accessibility trees. Overview metrics/graph, process table/actions, installed applications and cache page rendered. Fixed title contrast, dark combo styling and window sizing/scrolling discovered during these checks. Read-only inventory exposed a GUID-named SystemApps package; added a location-based protection rule and regression tests, then verified that its uninstall button was disabled. Light theme rendered and persisted across closing/reopening the published app. A read-only Chrome cache scan completed at the configured 20,000-file cap; no cache was deleted.
 
 UI deletion/uninstall of real applications was intentionally not exercised. Destructive integration tests use disposable fixtures. No Windows security/UAC prompts were automated.
 

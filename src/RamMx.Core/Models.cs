@@ -25,11 +25,12 @@ public sealed record ProcessSample(ProcessIdentity Identity, string Name, string
     public bool CanStop => ActionPolicy.Evaluate(this).Allowed;
 }
 
-public sealed class ProcessGroup
+public sealed class ProcessGroup : System.ComponentModel.INotifyPropertyChanged
 {
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
     public required string AppKey { get; init; }
     public required string Name { get; init; }
-    public required IReadOnlyList<ProcessSample> Members { get; init; }
+    public required IReadOnlyList<ProcessSample> Members { get; set; }
     public AppRole Role => Members[0].Role;
     public string RoleLabel => Labels.Role(Role);
     public string Description => Members[0].Description;
@@ -47,8 +48,24 @@ public sealed class ProcessGroup
     public bool CanStop => Members.All(p => ActionPolicy.Evaluate(p).Allowed);
     public string StopReason => Members.Select(ActionPolicy.Evaluate).FirstOrDefault(p => !p.Allowed)?.Reason ?? "ปิดได้เมื่อคุณไม่มีงานค้าง";
     public string StatusLabel => Foreground ? "กำลังใช้งาน" : Members.Any(p => p.HasWindow) ? "มีหน้าต่าง" : "เบื้องหลัง";
-    public bool Keep { get; set; }
+    private bool keep;
+    public bool Keep { get => keep; set { if (keep != value) { keep = value; PropertyChanged?.Invoke(this, new(nameof(KeepLabel))); } } }
     public string KeepLabel => Keep ? "เก็บไว้" : "";
+    public void UpdateSnapshot(ProcessGroup incoming)
+    {
+        if (incoming.AppKey != AppKey) throw new ArgumentException("Cannot replace a group with another app");
+        var before = VisibleValues();
+        Members = incoming.Members; keep = incoming.Keep;
+        foreach (var value in VisibleValues())
+            if (!Equals(before[value.Key], value.Value)) PropertyChanged?.Invoke(this, new(value.Key));
+    }
+    private Dictionary<string, object> VisibleValues() => new()
+    {
+        [nameof(RamLabel)] = RamLabel, [nameof(CommitLabel)] = CommitLabel, [nameof(CpuLabel)] = CpuLabel,
+        [nameof(Count)] = Count, [nameof(RoleLabel)] = RoleLabel, [nameof(StatusLabel)] = StatusLabel,
+        [nameof(KeepLabel)] = KeepLabel, [nameof(CanStop)] = CanStop, [nameof(Path)] = Path,
+        [nameof(Description)] = Description, [nameof(StopReason)] = StopReason
+    };
     public override string ToString() => $"{Name} · {RoleLabel} · {RamLabel}";
 }
 

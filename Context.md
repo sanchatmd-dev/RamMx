@@ -40,7 +40,7 @@ Broker mode shares the app executable (`RamMx.exe --broker ...`) rather than a s
 
 ## Data flows
 
-One non-overlapping UI timer samples every two seconds by default, ten seconds while hidden. A semaphore serializes manual and timer sampling. Metrics run off the dispatcher. Selection is restored by identity. Inventory refreshes on demand/after uninstall, not every tick. Package/path lookup is indexed; windows are enumerated once per sample. Polling does not inspect executable metadata or signatures. Observable collections emit one reset per update.
+One non-overlapping UI timer samples every two seconds by default, ten seconds while hidden. A semaphore serializes manual and timer sampling. Metrics run off the dispatcher. Selection is restored by identity. Inventory refreshes on demand/after uninstall, not every tick. Package/path lookup is indexed; windows are enumerated once per sample. Polling does not inspect executable metadata or signatures. Process rows retain their objects and notify only changed displayed values; membership/order updates are incremental. Other collections use one reset per batch. In-flight background samples are not applied during action confirmation, and stop operations capture a target snapshot.
 
 System metric aggregates persist once per minute for seven days. Completed action history is bounded to 1,000 entries; unfinished/unknown outcomes are retained. Database size is checked before new destructive actions. SQLite uses WAL/checkpoints. Preferences survive without tray/startup.
 

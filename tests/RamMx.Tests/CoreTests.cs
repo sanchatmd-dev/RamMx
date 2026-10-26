@@ -70,4 +70,11 @@ public sealed class CoreTests
     [Fact] public void Windows_prefix_sibling_is_not_an_os_directory() => Assert.False(InventoryService.IsProtectedInstall("Example", Environment.GetFolderPath(Environment.SpecialFolder.Windows) + "-Example"));
     [Fact] public void Shared_runtime_uninstall_is_protected() => Assert.True(InventoryService.IsProtectedInstall("Microsoft Visual C++ 2022 Redistributable", ""));
     [Fact] public void Invalid_thresholds_do_not_disable_pressure_rules() { var settings = new UserSettings { LowAvailablePercent = double.NaN, HighCommitPercent = double.PositiveInfinity }; settings.Validate(); Assert.Equal(10, settings.LowAvailablePercent); Assert.Equal(85, settings.HighCommitPercent); }
+    [Fact] public void Group_update_preserves_row_identity_and_refreshes_safety_policy()
+    {
+        var group = Group(Sample()); var changed = new List<string?>(); group.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+        group.UpdateSnapshot(Group(Sample(critical: true) with { PrivateWorkingSet = 1000000 }));
+        Assert.False(group.CanStop); Assert.Equal(1000000UL, group.PrivateBytes); Assert.Contains(nameof(ProcessGroup.CanStop), changed); Assert.Contains(nameof(ProcessGroup.RamLabel), changed);
+        changed.Clear(); group.UpdateSnapshot(Group(Sample(critical: true) with { PrivateWorkingSet = 1000000 })); Assert.Empty(changed);
+    }
 }

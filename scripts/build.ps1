@@ -14,6 +14,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
 if ($Publish) {
     & $rammxDotnet publish src\RamMx.App\RamMx.App.csproj -c Release -r win-x64 --self-contained true -o artifacts\RamMx
     if ($LASTEXITCODE -ne 0) { throw 'Publish failed' }
+    Copy-Item -LiteralPath 'README.md','Context.md' -Destination 'artifacts/RamMx'
+    New-Item -ItemType Directory -Path 'artifacts/RamMx/docs' -Force | Out-Null
+    Copy-Item -LiteralPath 'docs/DESIGN.md','docs/TESTING.md' -Destination 'artifacts/RamMx/docs'
     $rammxZip = Join-Path $rammxRoot 'artifacts\RamMx-win-x64.zip'
     Compress-Archive -Path (Join-Path $rammxRoot 'artifacts\RamMx\*') -DestinationPath $rammxZip -Force
     Get-FileHash -Algorithm SHA256 -LiteralPath $rammxZip | Format-List

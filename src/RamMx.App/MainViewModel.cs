@@ -173,7 +173,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         await sampleGate.WaitAsync();
         try
         {
-            var data = await Task.Run(() => (telemetry.ReadMemory(), telemetry.ReadProcesses())); snapshot = data.Item1;
+            var data = await Task.Run(() => (telemetry.ReadMemory(), telemetry.ReadProcesses()));
+            if (Busy && !force) return; // A command may have opened its confirmation while this sample was in flight.
+            snapshot = data.Item1;
             allGroups = TelemetryService.Group(data.Item2, Settings); ApplyFilter(); behaviour.Observe(snapshot.Timestamp, allGroups);
             chart.Enqueue(snapshot.AvailablePercent); while (chart.Count > Math.Max(2, 60 / Settings.RefreshSeconds)) chart.Dequeue(); Chart = chart.ToArray();
             if (snapshot.Timestamp - lastPersist > TimeSpan.FromMinutes(1)) { store.Record(snapshot); lastPersist = snapshot.Timestamp; }
@@ -187,7 +189,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         var selected = SelectedGroup?.AppKey;
         foreach (var group in allGroups) group.Keep = Settings.KeepApps.Contains(group.AppKey);
-        Replace(Groups, allGroups.Where(g => string.IsNullOrWhiteSpace(Search) || g.Name.Contains(Search, StringComparison.CurrentCultureIgnoreCase) || g.Path.Contains(Search, StringComparison.OrdinalIgnoreCase) || g.RoleLabel.Contains(Search, StringComparison.CurrentCultureIgnoreCase)));
+        var wanted = allGroups.Where(g => string.IsNullOrWhiteSpace(Search) || g.Name.Contains(Search, StringComparison.CurrentCultureIgnoreCase) || g.Path.Contains(Search, StringComparison.OrdinalIgnoreCase) || g.RoleLabel.Contains(Search, StringComparison.CurrentCultureIgnoreCase)).ToArray();
+        var keys = wanted.Select(g => g.AppKey).ToHashSet();
+        for (int i = Groups.Count - 1; i >= 0; i--) if (!keys.Contains(Groups[i].AppKey)) Groups.RemoveAt(i);
+        var existing = Groups.ToDictionary(g => g.AppKey);
+        for (int i = 0; i < wanted.Length; i++)
+        {
+            if (existing.TryGetValue(wanted[i].AppKey, out var row))
+            {
+                row.UpdateSnapshot(wanted[i]);
+                var index = Groups.IndexOf(row); if (index != i) Groups.Move(index, i);
+            }
+            else Groups.Insert(i, wanted[i]);
+        }
         SelectedGroup = Groups.FirstOrDefault(g => g.AppKey == selected);
     }
     private void FilterInstalled() { var key = SelectedInstalled?.Key; Replace(Installed, allInstalled.Where(a => string.IsNullOrWhiteSpace(AppSearch) || (a.Name + " " + a.Publisher).Contains(AppSearch, StringComparison.CurrentCultureIgnoreCase))); SelectedInstalled = Installed.FirstOrDefault(a => a.Key == key); }
@@ -196,7 +210,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         await RunAsync(async () =>
         {
-            var group = SelectedGroup!;
+            var selected = SelectedGroup!;
+            var group = new ProcessGroup { AppKey = selected.AppKey, Name = selected.Name, Members = selected.Members.ToArray(), Keep = selected.Keep };
             if (Settings.KeepApps.Contains(group.AppKey) && !interaction.Confirm("รายการที่คุณเลือกเก็บไว้", $"{group.Name} อยู่ใน Keep list ต้องการดำเนินการครั้งนี้หรือไม่?")) return;
             var title = force ? "ยืนยัน Force stop" : "ขอปิดแอปตามปกติ";
             if (!interaction.Confirm(title, $"{group.Name} · {group.Count} process\n{group.Path}\n\n{(force ? "งานที่ยังไม่บันทึกอาจสูญหาย การหยุดย้อนกลับไม่ได้" : "แอปอาจถามให้บันทึกงาน บาง process ไม่มีหน้าต่างและจะยังทำงานต่อ") }\n\n{string.Join("\n", group.Members.Select(m => $"{m.Name} · PID {m.Identity.Pid}"))}")) return;
