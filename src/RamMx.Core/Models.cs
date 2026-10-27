@@ -2,6 +2,7 @@ namespace RamMx.Core;
 
 public enum AppRole { UserApp, WindowsComponent, Security, ServiceHost, SharedRuntime, Unknown, Utility }
 public enum SignatureState { NotChecked, Valid, Unsigned, Invalid, Unavailable }
+public enum ProcessMemorySource { ProcessApi, PerformanceCounters }
 public enum ActionKind { Close, ForceStop, Uninstall, Cleanup, DefenderScan }
 public enum OperationStatus { Planned, Running, Completed, Partial, Failed, Cancelled, RebootRequired, UnknownOutcome }
 
@@ -20,9 +21,11 @@ public sealed record ProcessIdentity(int Pid, long CreationFileTime, string Path
 
 public sealed record ProcessSample(ProcessIdentity Identity, string Name, string AppKey, string DisplayName,
     AppRole Role, ulong WorkingSet, ulong? PrivateWorkingSet, ulong PrivateCommit, double CpuPercent,
-    bool? Critical, bool? Protected, bool HasWindow, bool IsForeground, string? PackageFullName, string Description, bool MemoryAvailable = true)
+    bool? Critical, bool? Protected, bool HasWindow, bool IsForeground, string? PackageFullName, string Description, bool MemoryAvailable = true,
+    ProcessMemorySource MemorySource = ProcessMemorySource.ProcessApi)
 {
     public bool CanStop => ActionPolicy.Evaluate(this).Allowed;
+    public string MemorySourceLabel => !MemoryAvailable ? "อ่านไม่ได้" : MemorySource == ProcessMemorySource.PerformanceCounters ? "Windows Performance Counters" : "Windows Process API";
 }
 
 public sealed class ProcessGroup : System.ComponentModel.INotifyPropertyChanged
@@ -130,7 +133,9 @@ public sealed class UserSettings
 
 public static class Format
 {
-    public static string Bytes(ulong value) => value >= 1073741824 ? $"{value / 1073741824d:F2} GiB" : $"{value / 1048576d:F1} MiB";
+    public static string Bytes(ulong value) => value >= 1073741824 ? $"{value / 1073741824d:F2} GiB"
+        : value >= 1048576 ? $"{value / 1048576d:F1} MiB"
+        : value >= 1024 ? $"{value / 1024d:F1} KiB" : $"{value} B";
 }
 public static class Labels
 {

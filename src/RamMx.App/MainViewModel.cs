@@ -99,7 +99,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             if (!ReferenceEquals(selectedGroup, value)) { selectedGroup = value; Notify(); }
             CommandManager.InvalidateRequerySuggested();
-            if (value != null) Details = $"{value.Name} · {value.RoleLabel} · {value.Count} process\n{value.Description}\n{value.Path}\nRAM เฉพาะแอป {value.RamLabel} (อ่านได้ {value.Coverage}/{value.Count}) · Private commit {value.CommitLabel}\n{value.StopReason}\nPID: {string.Join(", ", value.Members.Select(m => m.Identity.Pid))}";
+            if (value != null) Details = $"{value.Name} · {value.RoleLabel} · {value.Count} process\n{value.Description}\n{value.Path}\nRAM เฉพาะแอป {value.RamLabel} (อ่านได้ {value.Coverage}/{value.Count}) · Private commit {value.CommitLabel}\nแหล่งค่า RAM: {string.Join(", ", value.Members.Select(m => m.MemorySourceLabel).Distinct())}\n{value.StopReason}\nPID: {string.Join(", ", value.Members.Select(m => m.Identity.Pid))}";
         }
     }
     public InstalledApp? SelectedInstalled { get => selectedInstalled; set { selectedInstalled = value; Notify(); CommandManager.InvalidateRequerySuggested(); } }

@@ -52,6 +52,7 @@ Preview ยังไม่มีลายเซ็นผู้เผยแพร
 ### ตัวเลขและหลักฐาน
 
 - RAM เฉพาะแอปคือ private working set เมื่อ API รองรับ `*` หมายถึงข้อมูลบาง process อ่านไม่ได้
+- หาก Windows ไม่ให้เปิดอ่าน process โดยตรง จะใช้ Windows Performance Counters เป็นทางสำรอง อ่าน private working set ได้ด้วยสิทธิ์ปกติ และแสดงแหล่งค่าในรายละเอียด หากทั้งสองทางอ่านไม่ได้จะคงสถานะ “อ่านไม่ได้” ไม่แทนด้วยศูนย์ ค่าต่ำกว่า 1 MiB แสดงเป็น KiB/B
 - Commit ไม่ใช่ physical RAM ที่ resident ทั้งหมด และไม่ควรบวก working set ทุก process เป็นยอดทั้งเครื่อง
 - Unsigned, background activity หรือ RAM สูงอย่างเดียวไม่ใช่ malware verdict
 - Defender ใช้ provider/policy ที่มีอยู่ ไม่เปลี่ยน exclusions หรือปิดการป้องกัน

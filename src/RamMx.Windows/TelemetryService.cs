@@ -48,6 +48,7 @@ public sealed class TelemetryService
         var visiblePids = new HashSet<int>();
         Native.EnumWindows((window, _) => { if (Native.IsWindowVisible(window)) { Native.GetWindowThreadProcessId(window, out var owner); visiblePids.Add((int)owner); } return true; }, 0);
         var now = Stopwatch.GetTimestamp();
+        IReadOnlyDictionary<int, PerformanceMemoryReader.Reading>? performanceMemory = null;
         foreach (var process in Process.GetProcesses())
         {
             using (process)
@@ -69,7 +70,20 @@ public sealed class TelemetryService
                     if (!ex2)
                     {
                         counters.Size = (uint)(8 + 9 * IntPtr.Size);
-                        readable = Native.GetProcessMemoryInfo(query, ref counters, counters.Size);
+                        readable = !query.IsInvalid && Native.GetProcessMemoryInfo(query, ref counters, counters.Size);
+                    }
+                    ulong workingSet = readable ? counters.WorkingSet : 0;
+                    ulong commit = readable ? counters.PrivateUsage : 0;
+                    ulong? privateWorkingSet = ex2 ? (ulong)counters.PrivateWorkingSet : null;
+                    var memorySource = ProcessMemorySource.ProcessApi;
+                    if (!ex2)
+                    {
+                        performanceMemory ??= PerformanceMemoryReader.Read();
+                        if (performanceMemory.TryGetValue(process.Id, out var fallback) && PerformanceMemoryReader.Matches(fallback.Instance, process.ProcessName, process.Id))
+                        {
+                            workingSet = fallback.WorkingSet; privateWorkingSet = fallback.PrivateWorkingSet; commit = fallback.PrivateCommit;
+                            readable = true; memorySource = ProcessMemorySource.PerformanceCounters;
+                        }
                     }
                     var package = query.IsInvalid ? null : Native.PackageName(query);
                     InstalledApp? installed = package != null ? packages.GetValueOrDefault(package) : null;
@@ -88,9 +102,9 @@ public sealed class TelemetryService
                     if (previousCpu.TryGetValue(identity.InstanceKey, out var old) && now > old.Time)
                         cpu = Math.Clamp((cpuTime - old.Cpu) / 10000000d / ((now - old.Time) / (double)Stopwatch.Frequency) / Environment.ProcessorCount * 100, 0, 100);
                     previousCpu[identity.InstanceKey] = (cpuTime, now);
-                    results.Add(new(identity, process.ProcessName, key, displayName, role, counters.WorkingSet,
-                        ex2 ? (ulong)counters.PrivateWorkingSet : null, counters.PrivateUsage, cpu, critical, protection,
-                        visiblePids.Contains(process.Id), process.Id == foreground, package, description, readable));
+                    results.Add(new(identity, process.ProcessName, key, displayName, role, workingSet,
+                        privateWorkingSet, commit, cpu, critical, protection,
+                        visiblePids.Contains(process.Id), process.Id == foreground, package, description, readable, memorySource));
                 }
                 catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or System.NotSupportedException) { }
             }

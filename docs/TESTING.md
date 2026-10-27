@@ -4,7 +4,7 @@ Test host: Windows 11 Home x64, .NET SDK 10.0.403. Results describe this host, n
 
 ## Automated checks
 
-`./scripts/build.ps1 -Publish` restores the solution, builds Release, runs xUnit integration tests and publishes a self-contained win-x64 ZIP. Local results on 2026-10-27: **72 passed, 0 failed, 0 skipped**. Release compilation: **0 warnings, 0 errors**. TRX output is in `tests/RamMx.Tests/TestResults/` and uploaded by CI.
+`./scripts/build.ps1 -Publish` restores the solution, builds Release, runs xUnit integration tests and publishes a self-contained win-x64 ZIP. Local results on 2026-10-27: **87 passed, 0 failed, 0 skipped**. Release compilation: **0 warnings, 0 errors**. TRX output is in `tests/RamMx.Tests/TestResults/` and uploaded by CI.
 
 Coverage includes:
 
@@ -12,6 +12,7 @@ Coverage includes:
 - Private resident memory versus commit, unavailable metrics, profile/Keep/foreground rules and sustained pressure thresholds.
 - SQLite preference persistence, incomplete-action recovery and bounded settings import.
 - Real Win32 memory counters and process identity queries.
+- PDH memory fallback: real private resident counters, exact instance joins, duplicate PID/array-name rejection, two live fixtures with the same executable name, failed/missing/negative/inconsistent values, valid zero, process-name/PID matching, partial coverage and unchanged action guards.
 - Disposable WPF application: graceful close, refused close without automatic escalation, then a separate force-stop operation.
 - Disposable HKCU EXE uninstaller registration: launch, removal and fresh inventory verification.
 - Disposable cache trees: selected deletion, personal data preservation, replaced/modified/locked files, new files after preview, outside-root attempts and hard links.
@@ -49,6 +50,14 @@ Earlier non-controlled measurements during UI verification ranged around 3.5–7
 A resumed visible-window run on 12 logical processors, 20 seconds warm-up plus 120 seconds measured, observed **0.34% average normalized CPU**, **57.98 MiB peak private working set**, **97.05 MiB peak private commit**, handles **857→845**, and diagnostic sampler median/p95 **26.18/35.47 ms**. No UI automation calls were made during that interval. Different machine activity and tool attachment mean this is not a controlled before/after benchmark or a guaranteed footprint on every system.
 
 The tray run used the same warm-up/duration and 12 logical processors: **0.052% average normalized CPU**, **43.68 MiB peak private working set**, **81.12 MiB peak private commit**, handles **821→816**, sampler median/p95 **25.16/35.51 ms**. The main window was hidden and no UI automation calls occurred during measurement. Reopening the executable restored the original process; the second invocation exited rather than opening another instance.
+
+## RAM access fix — 2026-10-27
+
+Normal-user telemetry and the published UI now read private working set for winlogon, dwm, atieclxx and both fontdrvhost instances on this host. The final native test observed 362/366 processes with private RAM available; this is a point-in-time result, not a promise of universal access. The UI showed the two fontdrvhost instances separately at 172 KiB and 16 KiB; dwm showed 28.6 MiB, a distinct private-commit value and Windows Performance Counters as its RAM source. Close/force/admin stop remained disabled for that unresolved system process.
+
+The fallback uses Windows 11 Process V2. Legacy Process wildcard arrays can repeat instance names, which made name-based maps lose one same-name process. A regression test starts two disposable instances of the same fixture and requires both PID-specific readings; duplicate returned names fail closed. See Microsoft's [duplicate instance guidance](https://learn.microsoft.com/en-us/windows/win32/perfctrs/handling-duplicate-instance-names). Unavailable counters remain unavailable, and reading memory does not verify an inaccessible executable path.
+
+A post-fix footprint check with the process detail page visible (5 s warm-up, 61.37 s measured, 12 logical processors, 29 samples) observed 3.40% normalized app CPU, 60.10 MiB peak private working set and sampler median/p95 76.24/324.18 ms. A minimized check (10 s warm-up, 31.84 s measured, 15 samples) observed 0.102% CPU, 52.86 MiB peak private working set, handles 913→902 and sampler median/p95 72.92/556.90 ms. No UI automation calls ran during either interval. These short, different-view runs are not a controlled comparison with the earlier dashboard measurements: the visible CPU increase remains a profiling concern, and the earlier 0.336% visible result must not be treated as the footprint of this change.
 
 ## Remaining production gates
 
