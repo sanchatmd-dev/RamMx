@@ -31,7 +31,7 @@ public sealed class ProcessActions
                 if (!Native.GetProcessTimes(handle, out var created, out _, out _, out _) || created != target.Identity.CreationFileTime || !Native.ImagePath(handle).Equals(target.Identity.Path, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("Process identity เปลี่ยนก่อนดำเนินการ");
                 if (!Native.IsProcessCritical(handle, out var critical) || critical) throw new InvalidOperationException("ไม่ผ่านการตรวจ critical status");
-                if (Native.GetProcessInformation(handle, 7, out var protect, 4) && protect.Level != 0xfffffffe) throw new InvalidOperationException("Protected process");
+                if (!Native.GetProcessInformation(handle, 7, out var protect, 4) || protect.Level != 0xfffffffe) throw new InvalidOperationException("Protected process หรือยืนยัน protection status ไม่ได้");
                 if (force)
                 {
                     if (!Native.TerminateProcess(handle, 1)) throw new Win32Exception(Marshal.GetLastWin32Error());

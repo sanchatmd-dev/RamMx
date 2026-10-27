@@ -6,9 +6,9 @@ Windows native app for a Thai-speaking user to understand RAM usage, identify OS
 
 Repository: `sanchatmd-dev/RamMx`. Working v0.1.0 preview, not a claim that every production gate in the blueprint has passed.
 
-## Paused checkpoint — 2026-10-27
+## Resumed checkpoint — 2026-10-27
 
-The user requested a checkpoint and stop. Do not resume implementation until asked. See `docs/CHECKPOINT.md` for the exact distinction between tested packaged code and pending changes.
+The user resumed work on 2026-10-27. `docs/CHECKPOINT.md` preserves the historical paused state; current verification is recorded in `docs/TESTING.md`.
 
 ## Stack and source map
 
@@ -44,11 +44,15 @@ Broker mode shares the app executable (`RamMx.exe --broker ...`) rather than a s
 
 ## Data flows
 
-One non-overlapping UI timer samples every two seconds by default, ten seconds while hidden. A semaphore serializes manual and timer sampling. Metrics run off the dispatcher. Selection is restored by identity. Inventory refreshes on demand/after uninstall, not every tick. Package/path lookup is indexed; windows are enumerated once per sample. Polling does not inspect executable metadata or signatures. Process rows retain their objects and notify only changed displayed values; membership/order updates are incremental. Other collections use one reset per batch. In-flight background samples are not applied during action confirmation, and stop operations capture a target snapshot.
+One non-overlapping UI timer samples every two seconds by default, ten seconds while hidden/minimized. Hidden polling retains telemetry/history without refreshing visual collections. A semaphore serializes manual and timer sampling. Metrics run off the dispatcher. Selection is restored by identity. Inventory refreshes on demand/after uninstall, not every tick. Package/path lookup is indexed; windows are enumerated once per sample. Polling does not inspect executable metadata or signatures. Process rows retain their objects and notify only changed displayed values; membership/order updates are incremental and accessible names remain stable. Other collections skip equal batches. In-flight background samples are not applied during action confirmation, and stop operations capture a target snapshot.
+
+The review-candidates table refreshes every ten seconds with explanations for unknown/temporary paths or observed growth after baseline. Explicit inspection opens the evidence tab. Protection status is nullable; an unreadable status denies stopping. Cancellation of an MSIX wait leaves the native operation running and reports UnknownOutcome. Reopening the executable signals the existing instance to restore from tray.
 
 System metric aggregates persist once per minute for seven days. Completed action history is bounded to 1,000 entries; unfinished/unknown outcomes are retained. Database size is checked before new destructive actions. SQLite uses WAL/checkpoints. Preferences survive without tray/startup.
 
 Recipes: Chrome/Edge profile Cache/Cache_Data, Code Cache, GPUCache; VS Code Cache/Cache_Data, CachedData, GPUCache, Code Cache; Discord/Slack Cache/Cache_Data, Code Cache, GPUCache. Browser profile directory patterns are restricted. A recipe does not imply all vendor versions have been tested.
+
+Scan budgets are 20,000 accepted files, 40,000 visited entries, depth 64 and 2,000 skipped messages. Profile discovery shares the visit budget. Traversal is iterative and queued directory ancestors are revalidated/locked before enumeration. Any budget truncation is shown as a partial scan.
 
 ## Build and verification
 

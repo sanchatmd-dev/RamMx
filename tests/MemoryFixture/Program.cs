@@ -18,6 +18,13 @@ internal static class Program
         allocation = new byte[32 * 1024 * 1024];
         for (int i = 0; i < allocation.Length; i += 4096) allocation[i] = 1;
         var app = new Application();
+        if (args.Contains("--background"))
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var lifetime = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
+            lifetime.Tick += (_, _) => { lifetime.Stop(); app.Shutdown(); };
+            lifetime.Start(); app.Run(); GC.KeepAlive(allocation); return;
+        }
         var window = new Window { Title = "RamMx disposable memory fixture", Width = 450, Height = 180, Content = new System.Windows.Controls.TextBlock { Text = "Disposable test process · 32 MiB\nNo user data. Safe to close.", Margin = new Thickness(24), FontSize = 18 } };
         if (args.Contains("--refuse-close")) window.Closing += (_, e) => e.Cancel = true;
         app.Run(window); GC.KeepAlive(allocation);

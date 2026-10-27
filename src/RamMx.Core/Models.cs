@@ -20,7 +20,7 @@ public sealed record ProcessIdentity(int Pid, long CreationFileTime, string Path
 
 public sealed record ProcessSample(ProcessIdentity Identity, string Name, string AppKey, string DisplayName,
     AppRole Role, ulong WorkingSet, ulong? PrivateWorkingSet, ulong PrivateCommit, double CpuPercent,
-    bool? Critical, bool Protected, bool HasWindow, bool IsForeground, string? PackageFullName, string Description, bool MemoryAvailable = true)
+    bool? Critical, bool? Protected, bool HasWindow, bool IsForeground, string? PackageFullName, string Description, bool MemoryAvailable = true)
 {
     public bool CanStop => ActionPolicy.Evaluate(this).Allowed;
 }
@@ -66,7 +66,9 @@ public sealed class ProcessGroup : System.ComponentModel.INotifyPropertyChanged
         [nameof(KeepLabel)] = KeepLabel, [nameof(CanStop)] = CanStop, [nameof(Path)] = Path,
         [nameof(Description)] = Description, [nameof(StopReason)] = StopReason
     };
-    public override string ToString() => $"{Name} · {RoleLabel} · {RamLabel}";
+    // WPF uses this as the row's accessible name. Keep it stable as metrics change;
+    // RAM and CPU remain exposed through the accessible values of their own cells.
+    public override string ToString() => Name;
 }
 
 public sealed record InstalledApp(string Key, string Name, string Version, string Publisher, string InstallLocation,
@@ -114,6 +116,13 @@ public sealed class UserSettings
         KeepApps = new(KeepApps ?? [], StringComparer.OrdinalIgnoreCase);
         ProfileCandidates ??= new();
         if (KeepApps.Count > 10000 || ProfileCandidates.Count > 30) throw new InvalidDataException("Settings ใหญ่เกินกำหนด");
+        var profiles = new Dictionary<string, HashSet<string>>();
+        foreach (var entry in ProfileCandidates)
+        {
+            if (entry.Value?.Count > 10000) throw new InvalidDataException("รายการแอปในโปรไฟล์ใหญ่เกินกำหนด");
+            profiles[entry.Key] = new(entry.Value ?? [], StringComparer.OrdinalIgnoreCase);
+        }
+        ProfileCandidates = profiles;
         if (Profile is not ("ทั่วไป" or "ทำงาน" or "เล่นเกม")) Profile = "ทั่วไป";
         if (Theme is not ("Dark" or "Light")) Theme = "Dark";
     }

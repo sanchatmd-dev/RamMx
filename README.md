@@ -12,7 +12,7 @@
 | แอปที่ทำงาน | process grouping, private working set, CPU, ประเภทระบบ/แอป/runtime และ path |
 | ควบคุมแอป | ขอปิดตามปกติและ force stop แยกคำสั่ง ตรวจ identity/critical status ซ้ำ |
 | คำแนะนำ | โปรไฟล์, Keep list, รายการที่ผู้ใช้ระบุว่าไม่ใช้ และ pressure ที่ต่อเนื่อง |
-| ตรวจสอบเบื้องหลัง | Authenticode แบบ offline, startup associations และแนวโน้ม RAM พร้อมหลักฐาน |
+| ตรวจสอบเบื้องหลัง | รายการควรตรวจจาก path/แนวโน้ม RAM, Authenticode แบบ offline และ startup associations พร้อมเหตุผล |
 | ถอนติดตั้ง | registry/MSIX inventory; native MSI/EXE/MSIX uninstall และตรวจ registration หลังทำ |
 | Cache / leftovers | preview และเลือกลบ cache ของ Chrome, Edge, VS Code, Discord และ Slack |
 | การตั้งค่า | SQLite, dark/light, refresh interval, profiles, thresholds, tray, startup, import/export |
@@ -28,6 +28,8 @@
 2. แตกไฟล์ทั้งหมดไปยังโฟลเดอร์เดียวกัน
 3. เปิด `RamMx.exe` ด้วยสิทธิ์ผู้ใช้ปกติ
 4. เลือกแอปแล้วอ่านรายละเอียดก่อนปิดหรือถอน
+
+ถ้า RamMx อยู่ใน tray ให้เปิด `RamMx.exe` อีกครั้งเพื่อเรียกหน้าต่างเดิมกลับมา แพ็กเกจมี `build-info.json` ระบุ source commit และมีไฟล์ SHA-256 คู่กับ ZIP สำหรับตรวจว่าไฟล์ตรงกัน
 
 Preview ยังไม่มีลายเซ็นผู้เผยแพร่ Authenticode ไม่มีการสร้างใบรับรองที่เครื่องคุณต้องเชื่อถือเอง คำสั่ง Admin เป็นตัวเลือกแยกและ Windows จะแสดง UAC ตามปกติ
 

@@ -25,20 +25,21 @@ public partial class MainWindow : Window
         {
             if (sampling || viewModel.Busy) return;
             sampling = true;
-            try { await viewModel.SampleAsync(); }
-            finally { sampling = false; timer.Interval = TimeSpan.FromSeconds(IsVisible ? viewModel.Settings.RefreshSeconds : 10); }
+            try { await viewModel.SampleAsync(updateVisuals: IsVisible && WindowState != WindowState.Minimized); }
+            finally { sampling = false; timer.Interval = TimeSpan.FromSeconds(IsVisible && WindowState != WindowState.Minimized ? viewModel.Settings.RefreshSeconds : 10); }
         };
-        StateChanged += (_, _) => { if (WindowState == WindowState.Minimized && viewModel.MinimizeToTray) { tray.Visible = true; Hide(); } };
+        StateChanged += (_, _) => { if (WindowState == WindowState.Minimized && viewModel.MinimizeToTray) ShowInTray(); };
         Closing += OnClosing;
         Closed += (_, _) => { timer.Stop(); tray.Dispose(); viewModel.Dispose(); };
     }
     public async Task InitializeAsync() { await viewModel.InitializeAsync(); timer.Interval = TimeSpan.FromSeconds(viewModel.RefreshSeconds); timer.Start(); }
-    private void RestoreWindow() { Show(); WindowState = WindowState.Normal; Activate(); tray.Visible = false; }
+    public void ShowInTray() { tray.Visible = true; Hide(); timer.Interval = TimeSpan.FromSeconds(10); }
+    public void RestoreWindow() { Show(); WindowState = WindowState.Normal; Activate(); tray.Visible = false; timer.Interval = TimeSpan.FromSeconds(viewModel.RefreshSeconds); }
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         if (viewModel.Busy) { e.Cancel = true; System.Windows.MessageBox.Show("มีรายการกำลังทำงานอยู่ กรุณารอผลหรือกดยกเลิกการรอก่อนปิด", "RamMx"); return; }
         viewModel.Settings.WindowWidth = ActualWidth; viewModel.Settings.WindowHeight = ActualHeight;
-        if (viewModel.MinimizeToTray && !exitRequested) { e.Cancel = true; tray.Visible = true; Hide(); viewModel.SaveSettings(); }
+        if (viewModel.MinimizeToTray && !exitRequested) { e.Cancel = true; ShowInTray(); viewModel.SaveSettings(); }
     }
     private void GoProcesses(object sender, RoutedEventArgs e) => viewModel.Page = 1;
     private void GoStorage(object sender, RoutedEventArgs e) => viewModel.Page = 3;

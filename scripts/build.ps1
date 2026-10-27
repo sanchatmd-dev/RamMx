@@ -17,7 +17,17 @@ if ($Publish) {
     Copy-Item -LiteralPath 'README.md','Context.md' -Destination 'artifacts/RamMx'
     New-Item -ItemType Directory -Path 'artifacts/RamMx/docs' -Force | Out-Null
     Copy-Item -LiteralPath 'docs/DESIGN.md','docs/TESTING.md' -Destination 'artifacts/RamMx/docs'
+    $rammxCommit = 'unknown'
+    $rammxDirty = $null
+    if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath '.git')) {
+        $rammxCommit = (git rev-parse HEAD).Trim()
+        $rammxDirty = [bool](git status --porcelain)
+    }
+    [ordered]@{ Version = '0.1.0-preview'; SourceCommit = $rammxCommit; SourceDirty = $rammxDirty; BuiltAtUtc = [DateTime]::UtcNow.ToString('O'); Runtime = 'win-x64'; SelfContained = $true } |
+        ConvertTo-Json | Set-Content -LiteralPath 'artifacts/RamMx/build-info.json' -Encoding utf8
     $rammxZip = Join-Path $rammxRoot 'artifacts\RamMx-win-x64.zip'
     Compress-Archive -Path (Join-Path $rammxRoot 'artifacts\RamMx\*') -DestinationPath $rammxZip -Force
-    Get-FileHash -Algorithm SHA256 -LiteralPath $rammxZip | Format-List
+    $rammxHash = Get-FileHash -Algorithm SHA256 -LiteralPath $rammxZip
+    ($rammxHash.Hash + '  RamMx-win-x64.zip') | Set-Content -LiteralPath ($rammxZip + '.sha256.txt') -Encoding ascii
+    $rammxHash | Format-List
 }

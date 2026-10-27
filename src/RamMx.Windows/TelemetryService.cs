@@ -58,9 +58,11 @@ public sealed class TelemetryService
                     using var limited = handle.IsInvalid ? Native.OpenProcess(0x1000, false, process.Id) : null;
                     var query = limited ?? handle;
                     string path = query.IsInvalid ? "" : Native.ImagePath(query);
-                    Native.GetProcessTimes(query, out long creation, out _, out long kernel, out long user);
+                    if (query.IsInvalid || !Native.GetProcessTimes(query, out long creationValue, out _, out long kernelValue, out long userValue))
+                    { creationValue = 0; kernelValue = 0; userValue = 0; }
+                    long creation = creationValue, kernel = kernelValue, user = userValue;
                     bool? critical = !query.IsInvalid && Native.IsProcessCritical(query, out bool value) ? value : null;
-                    bool protection = !query.IsInvalid && Native.GetProcessInformation(query, 7, out var protectionInfo, 4) && protectionInfo.Level != 0xfffffffe;
+                    bool? protection = !query.IsInvalid && Native.GetProcessInformation(query, 7, out var protectionInfo, 4) ? protectionInfo.Level != 0xfffffffe : null;
                     var counters = new Native.MemoryCounters { Size = (uint)Marshal.SizeOf<Native.MemoryCounters>() };
                     bool ex2 = !query.IsInvalid && Native.GetProcessMemoryInfo(query, ref counters, counters.Size);
                     bool readable = ex2;
@@ -102,12 +104,12 @@ public sealed class TelemetryService
         .GroupBy(s => s.AppKey).Select(g => new ProcessGroup { AppKey = g.Key, Name = g.First().DisplayName, Members = g.ToArray(), Keep = settings.KeepApps.Contains(g.Key) })
         .OrderByDescending(g => g.PrivateBytes).ToArray();
 
-    private AppRole Classify(string name, string path, int session, bool? critical, bool protection)
+    private AppRole Classify(string name, string path, int session, bool? critical, bool? protection)
     {
         if (name.Contains("RamMx", StringComparison.OrdinalIgnoreCase)) return AppRole.Utility;
         if (new[] { "MsMpEng", "MpDefenderCoreService", "NisSrv", "SecurityHealthService", "SecurityHealthSystray", "Sense", "MsSense" }.Contains(name, StringComparer.OrdinalIgnoreCase)) return AppRole.Security;
         if (name.Equals("svchost", StringComparison.OrdinalIgnoreCase)) return AppRole.ServiceHost;
-        if (critical == true || protection || (path.Length > 0 && SafeInside(windows, path))) return AppRole.WindowsComponent;
+        if (critical == true || protection == true || (path.Length > 0 && SafeInside(windows, path))) return AppRole.WindowsComponent;
         if (new[] { "node", "python", "pythonw", "java", "javaw", "dotnet", "msedgewebview2", "conhost", "pwsh", "powershell", "cmd" }.Contains(name, StringComparer.OrdinalIgnoreCase)) return AppRole.SharedRuntime;
         if (session != ownSession) return AppRole.ServiceHost;
         if (path.Length == 0 || path.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase)) return AppRole.Unknown;

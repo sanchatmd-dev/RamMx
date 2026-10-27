@@ -21,7 +21,10 @@ public sealed class UninstallService
             {
                 var operation = new PackageManager().RemovePackageAsync(actual.PackageFullName!);
                 // PackageManager is the authority for data/dependency removal. Do not delete WindowsApps ourselves.
-                var result = await operation;
+                var pending = operation.AsTask();
+                DeploymentResult result;
+                try { result = await WaitForNativeAsync(pending, cancellationToken); }
+                catch (OperationCanceledException) { return new(OperationStatus.UnknownOutcome, "หยุดรอผลแล้ว Windows อาจยังถอน package อยู่ ตรวจรายการติดตั้งก่อนทำซ้ำ"); }
                 if (result.ExtendedErrorCode != null && result.ExtendedErrorCode.HResult < 0) return new(OperationStatus.Failed, result.ErrorText, NativeCode: result.ExtendedErrorCode.HResult);
             }
             else
@@ -58,6 +61,17 @@ public sealed class UninstallService
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223) { return new(OperationStatus.Cancelled, "ยกเลิกการอนุญาตของ Windows"); }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or COMException or ArgumentException)
         { return new(OperationStatus.Failed, ex.Message, NativeCode: ex.HResult); }
+    }
+
+    internal static async Task<T> WaitForNativeAsync<T>(Task<T> operation, CancellationToken token)
+    {
+        // Cancellation stops this app's wait, not the OS operation or its possible data removal.
+        try { return await operation.WaitAsync(token); }
+        catch (OperationCanceledException)
+        {
+            _ = operation.ContinueWith(t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            throw;
+        }
     }
 
     public static (string Executable, string Arguments) ParseCommand(string command)

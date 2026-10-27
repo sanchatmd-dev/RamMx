@@ -6,7 +6,7 @@ public static class ActionPolicy
     public static PolicyDecision Evaluate(ProcessSample process)
     {
         if (process.Critical != false) return new(false, "เป็น critical process หรือยังตรวจสถานะไม่ได้");
-        if (process.Protected) return new(false, "Windows ปกป้อง process นี้");
+        if (process.Protected != false) return new(false, "Windows ปกป้อง process นี้ หรือยังตรวจสถานะการปกป้องไม่ได้");
         if (process.Role != AppRole.UserApp) return new(false, "ส่วนของระบบ / runtime / ตัวตนไม่ชัดเจน: ไม่เสนอให้หยุด");
         if (process.Identity.CreationFileTime <= 0 || string.IsNullOrWhiteSpace(process.Identity.Path)) return new(false, "ข้อมูลตัวตนไม่ครบ");
         return new(true, "ปิดได้เมื่อไม่มีงานค้าง");

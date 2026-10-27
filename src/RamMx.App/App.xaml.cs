@@ -9,6 +9,8 @@ namespace RamMx.App;
 public partial class App : System.Windows.Application
 {
     private Mutex? singleInstance;
+    private EventWaitHandle? activation;
+    private RegisteredWaitHandle? activationWait;
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -45,14 +47,25 @@ public partial class App : System.Windows.Application
             catch (Exception ex) { System.Windows.MessageBox.Show(ex.Message, "RamMx helper", MessageBoxButton.OK, MessageBoxImage.Information); }
             Shutdown(); return;
         }
+        var activationName = "Local\\RamMx-Activate-" + Environment.UserName;
         singleInstance = new Mutex(true, "Local\\RamMx-" + Environment.UserName, out var created);
-        if (!created) { System.Windows.MessageBox.Show("RamMx เปิดอยู่แล้ว ตรวจหน้าต่างหรือไอคอน tray", "RamMx"); Shutdown(); return; }
+        if (!created)
+        {
+            try { using var signal = EventWaitHandle.OpenExisting(activationName); signal.Set(); }
+            catch (WaitHandleCannotBeOpenedException) { System.Windows.MessageBox.Show("RamMx กำลังเริ่มต้น โปรดลองเปิดอีกครั้ง", "RamMx"); }
+            Shutdown(); return;
+        }
+        activation = new EventWaitHandle(false, EventResetMode.AutoReset, activationName);
+        activationWait = ThreadPool.RegisterWaitForSingleObject(activation, (_, _) =>
+        {
+            if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(() => { if (MainWindow is MainWindow window) window.RestoreWindow(); });
+        }, null, Timeout.Infinite, false);
         DispatcherUnhandledException += (_, args) => { System.Windows.MessageBox.Show(args.Exception.Message, "RamMx — เกิดข้อผิดพลาด"); args.Handled = true; };
         try
         {
             var window = new MainWindow(); MainWindow = window; window.Show();
             await window.InitializeAsync();
-            if (e.Args.Contains("--tray")) window.WindowState = WindowState.Minimized;
+            if (e.Args.Contains("--tray")) window.ShowInTray();
         }
         catch (Exception ex) { System.Windows.MessageBox.Show(ex.Message, "RamMx เปิดไม่ได้"); Shutdown(); }
     }
@@ -64,5 +77,5 @@ public partial class App : System.Windows.Application
         var names = new[] { "BackgroundBrush", "SurfaceBrush", "RaisedBrush", "TextBrush", "MutedBrush", "BorderBrush", "AccentBrush" };
         for (int i = 0; i < names.Length; i++) Current.Resources[names[i]] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(colors[i]));
     }
-    protected override void OnExit(ExitEventArgs e) { singleInstance?.Dispose(); base.OnExit(e); }
+    protected override void OnExit(ExitEventArgs e) { activationWait?.Unregister(null); activation?.Dispose(); singleInstance?.Dispose(); base.OnExit(e); }
 }

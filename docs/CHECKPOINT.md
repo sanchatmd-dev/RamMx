@@ -2,6 +2,8 @@
 
 The user requested a checkpoint and stop. This is a saved work state, not a claim of production readiness.
 
+**Historical record:** the user resumed on 2026-10-27. The background-review feature and follow-up fixes now have 72 passing local tests. Current results superseding the pending items below are in [TESTING.md](TESTING.md); this file retains the earlier checkpoint for traceability.
+
 ## Verified baseline
 
 - `main` commit `84dab564d9c6313f9435822785dc051859518391`: native WPF app, telemetry, guarded close/force-stop, MSI/EXE/MSIX adapters, five cache recipes, signature/Defender integration, recommendations, SQLite settings and history.

@@ -18,11 +18,18 @@ public sealed record CacheScan(IReadOnlyList<CacheFile> Files, IReadOnlyList<str
     public ulong Bytes => (ulong)Files.Sum(f => f.Size);
 }
 
+internal sealed record CacheScanLimits(int MaxFiles = 20000, int MaxEntries = 40000, int MaxDepth = 64, int MaxSkipped = 2000);
+
 public sealed class CacheService
 {
     // Only these fixed, application-specific disposable caches are supported. No directory name guessing.
     public IReadOnlyList<CacheRecipe> Recipes { get; }
-    internal CacheService(CacheRecipe fixture) => Recipes = [fixture];
+    private readonly CacheScanLimits limits = new();
+    internal CacheService(CacheRecipe fixture, CacheScanLimits? limits = null)
+    {
+        Recipes = [fixture]; this.limits = limits ?? new();
+        if (this.limits.MaxFiles < 1 || this.limits.MaxEntries < 1 || this.limits.MaxDepth < 0 || this.limits.MaxSkipped < 1) throw new ArgumentOutOfRangeException(nameof(limits));
+    }
     public CacheService(string? local = null, string? roaming = null)
     {
         local ??= Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -36,10 +43,24 @@ public sealed class CacheService
         ];
     }
 
-    public bool IsRunning(CacheRecipe recipe) => System.Diagnostics.Process.GetProcesses().Any(p =>
-    { using (p) { try { return recipe.ProcessNames.Contains(p.ProcessName, StringComparer.OrdinalIgnoreCase); } catch { return false; } } });
+    public bool IsRunning(CacheRecipe recipe)
+    {
+        var processes = System.Diagnostics.Process.GetProcesses();
+        try
+        {
+            foreach (var process in processes)
+            {
+                try { if (recipe.ProcessNames.Contains(process.ProcessName, StringComparer.OrdinalIgnoreCase)) return true; }
+                catch (Exception ex) when (ex is InvalidOperationException or Win32Exception) { }
+            }
+            return false;
+        }
+        finally { foreach (var process in processes) process.Dispose(); }
+    }
 
-    public IReadOnlyList<string> ResolveRoots(CacheRecipe recipe)
+    public IReadOnlyList<string> ResolveRoots(CacheRecipe recipe) => ResolveRoots(recipe, new ScanBudget(limits), default);
+
+    private IReadOnlyList<string> ResolveRoots(CacheRecipe recipe, ScanBudget budget, CancellationToken cancellationToken)
     {
         if (!Directory.Exists(recipe.BaseDirectory)) return [];
         var bases = new List<string>();
@@ -47,8 +68,13 @@ public sealed class CacheService
         {
             foreach (var directory in Directory.EnumerateDirectories(recipe.BaseDirectory))
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!budget.Visit()) break;
                 var name = Path.GetFileName(directory);
-                if ((name is "Default" or "Guest Profile" || name.StartsWith("Profile ", StringComparison.Ordinal)) && (File.GetAttributes(directory) & FileAttributes.ReparsePoint) == 0) bases.Add(directory);
+                if (name is not ("Default" or "Guest Profile") && !name.StartsWith("Profile ", StringComparison.Ordinal)) continue;
+                try { if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) == 0) bases.Add(directory); else budget.Skip(directory + ": reparse profile"); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception) { budget.Skip(directory + ": " + ex.Message); }
+                if (budget.Stop) break;
             }
         }
         else bases.Add(recipe.BaseDirectory);
@@ -58,40 +84,71 @@ public sealed class CacheService
     public CacheScan Scan(CacheRecipe recipe, CancellationToken cancellationToken = default)
     {
         if (!Recipes.Any(r => r == recipe)) throw new InvalidOperationException("Unknown recipe");
-        var files = new List<CacheFile>(); var skipped = new List<string>(); bool truncated = false;
-        foreach (var root in ResolveRoots(recipe))
+        var files = new List<CacheFile>(); var budget = new ScanBudget(limits);
+        foreach (var root in ResolveRoots(recipe, budget, cancellationToken))
         {
+            if (budget.Stop) break;
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 using var locks = LockAncestors(root);
-                Walk(root, root);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception) { skipped.Add($"{root}: {ex.Message}"); }
-        }
-        return new(files, skipped, truncated);
-        void Walk(string directory, string root)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (files.Count >= 20000) { truncated = true; return; }
-            using var folder = OpenDirectory(directory);
-            foreach (var path in Directory.EnumerateFileSystemEntries(directory))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (files.Count >= 20000) { truncated = true; break; }
-                try
+                var pending = new Stack<(string Path, int Depth)>(); pending.Push((root, 0));
+                while (pending.Count > 0 && !budget.Stop)
                 {
-                    var attributes = File.GetAttributes(path);
-                    if ((attributes & FileAttributes.ReparsePoint) != 0) { skipped.Add(path + ": reparse point"); continue; }
-                    if ((attributes & FileAttributes.Directory) != 0) { Walk(path, root); continue; }
-                    using var file = OpenFile(path, false);
-                    var info = Info(file);
-                    if (info.Links > 1) { skipped.Add(path + ": shared hard link"); continue; }
-                    files.Add(new(recipe.Id, root, path, (long)(((ulong)info.SizeHigh << 32) | info.SizeLow), info.WriteTime, info.Volume, ((ulong)info.IndexHigh << 32) | info.IndexLow));
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var (directory, depth) = pending.Pop();
+                    try
+                    {
+                        // Each queued directory is revalidated under ancestor handles before enumeration.
+                        // This keeps traversal iterative without trusting paths queued before a rename/reparse change.
+                        using var ancestors = LockAncestors(directory);
+                        foreach (var path in Directory.EnumerateFileSystemEntries(directory))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            if (files.Count >= limits.MaxFiles) { budget.Truncate(); break; }
+                            if (!budget.Visit()) break;
+                            try
+                            {
+                                var attributes = File.GetAttributes(path);
+                                if ((attributes & FileAttributes.ReparsePoint) != 0) { budget.Skip(path + ": reparse point"); continue; }
+                                if ((attributes & FileAttributes.Directory) != 0)
+                                {
+                                    if (depth >= limits.MaxDepth) { budget.Truncated = true; budget.Skip(path + ": maximum scan depth"); }
+                                    else pending.Push((path, depth + 1));
+                                    continue;
+                                }
+                                using var file = OpenFile(path, false);
+                                var info = Info(file);
+                                if ((info.Attributes & (uint)(FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0) { budget.Skip(path + ": changed to reparse point or directory"); continue; }
+                                if (info.Links > 1) { budget.Skip(path + ": shared hard link"); continue; }
+                                files.Add(new(recipe.Id, root, path, (long)(((ulong)info.SizeHigh << 32) | info.SizeLow), info.WriteTime, info.Volume, ((ulong)info.IndexHigh << 32) | info.IndexLow));
+                            }
+                            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception) { budget.Skip(path + ": " + ex.Message); }
+                            if (budget.Stop) break;
+                        }
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception) { budget.Skip(directory + ": " + ex.Message); }
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception) { if (skipped.Count < 2000) skipped.Add(path + ": " + ex.Message); }
             }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception) { budget.Skip($"{root}: {ex.Message}"); }
         }
+        return new(files, budget.Skipped, budget.Truncated);
+    }
+
+    private sealed class ScanBudget(CacheScanLimits limits)
+    {
+        private int visited;
+        public List<string> Skipped { get; } = [];
+        public bool Truncated { get; set; }
+        public bool Stop { get; private set; }
+        public bool Visit()
+        {
+            if (Stop) return false;
+            if (visited >= limits.MaxEntries) { Truncate(); return false; }
+            visited++; return true;
+        }
+        public void Skip(string message) { if (Skipped.Count < limits.MaxSkipped) Skipped.Add(message); if (Skipped.Count >= limits.MaxSkipped) Truncate(); }
+        public void Truncate() { Truncated = true; Stop = true; }
     }
 
     public ActionResult Delete(CacheRecipe recipe, IReadOnlyList<CacheFile> selected, CancellationToken cancellationToken = default)

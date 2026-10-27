@@ -14,7 +14,8 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
 {
     public void ReplaceAll(IEnumerable<T> source)
     {
-        var values = source.ToArray(); Items.Clear(); foreach (var value in values) Items.Add(value);
+        var values = source.ToArray(); if (this.SequenceEqual(values)) return;
+        Items.Clear(); foreach (var value in values) Items.Add(value);
         OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
         OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
         OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
@@ -38,7 +39,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly CacheService cache = new();
     private readonly RecommendationEngine recommender = new();
     private readonly BehaviourTracker behaviour = new();
-    private readonly Queue<double> chart = new();
+    private readonly Queue<(DateTimeOffset Time, double Value)> chart = new();
     private readonly SemaphoreSlim sampleGate = new(1, 1);
     private CancellationTokenSource? actionCancellation;
     private IReadOnlyList<ProcessGroup> allGroups = [];
@@ -57,6 +58,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public UserSettings Settings { get; }
     public bool Busy { get => busy; private set { busy = value; Notify(); CommandManager.InvalidateRequerySuggested(); } }
     public int Page { get => page; set { page = value; Notify(); } }
+    private int reviewTab;
+    public int ReviewTab { get => reviewTab; set { reviewTab = value; Notify(); } }
     public string Status { get => status; set { status = value; Notify(); } }
     public string Details { get => details; private set { details = value; Notify(); } }
     public string Inspection { get => inspection; private set { inspection = value; Notify(); } }
@@ -72,7 +75,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string MemoryLabel => snapshot == null ? "" : $"พร้อมใช้ {snapshot.AvailablePercent:F1}% · ส่วนที่ยังไม่พร้อมใช้ {snapshot.UsedPercent:F1}%";
     public string ProcessSummary => $"{allGroups.Sum(g => g.Count)} processes · {allGroups.Count} กลุ่ม · RAM เฉพาะแอปที่อ่านได้ ไม่รวมส่วนแชร์";
     public double[] Chart { get; private set; } = [];
-    public string ChartCaption => $"Available RAM (%) · {Math.Min(60, chart.Count * Settings.RefreshSeconds)} วินาทีล่าสุด · ยิ่งสูงยิ่งมี RAM พร้อมใช้";
+    public string ChartCaption => $"Available RAM (%) · {(chart.Count < 2 ? 0 : (int)(chart.Last().Time - chart.Peek().Time).TotalSeconds)} วินาทีล่าสุด · ยิ่งสูงยิ่งมี RAM พร้อมใช้";
     public string Profile { get => Settings.Profile; set { Settings.Profile = value; SaveSettings(); Notify(); UpdateRecommendations(); } }
     public string Theme { get => Settings.Theme; set { Settings.Theme = value; App.SetTheme(value); SaveSettings(); Notify(); } }
     public int RefreshSeconds { get => Settings.RefreshSeconds; set { Settings.RefreshSeconds = value; SaveSettings(); Notify(); } }
@@ -94,7 +97,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         get => selectedGroup;
         set
         {
-            selectedGroup = value; Notify(); CommandManager.InvalidateRequerySuggested();
+            if (!ReferenceEquals(selectedGroup, value)) { selectedGroup = value; Notify(); }
+            CommandManager.InvalidateRequerySuggested();
             if (value != null) Details = $"{value.Name} · {value.RoleLabel} · {value.Count} process\n{value.Description}\n{value.Path}\nRAM เฉพาะแอป {value.RamLabel} (อ่านได้ {value.Coverage}/{value.Count}) · Private commit {value.CommitLabel}\n{value.StopReason}\nPID: {string.Join(", ", value.Members.Select(m => m.Identity.Pid))}";
         }
     }
@@ -178,7 +182,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         Replace(Startup, await Task.Run(inventory.ReadStartup));
         await SampleAsync(true);
     }
-    public async Task SampleAsync(bool force = false)
+    public async Task SampleAsync(bool force = false, bool updateVisuals = true)
     {
         if (Busy && !force) return;
         await sampleGate.WaitAsync();
@@ -187,15 +191,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var data = await Task.Run(() => (telemetry.ReadMemory(), telemetry.ReadProcesses()));
             if (Busy && !force) return; // A command may have opened its confirmation while this sample was in flight.
             snapshot = data.Item1;
-            allGroups = TelemetryService.Group(data.Item2, Settings); ApplyFilter(); behaviour.Observe(snapshot.Timestamp, allGroups);
+            allGroups = TelemetryService.Group(data.Item2, Settings); behaviour.Observe(snapshot.Timestamp, allGroups);
+            chart.Enqueue((snapshot.Timestamp, snapshot.AvailablePercent));
+            while (chart.Count > 61 || (chart.Count > 1 && snapshot.Timestamp - chart.Peek().Time > TimeSpan.FromSeconds(60))) chart.Dequeue();
+            if (snapshot.Timestamp - lastPersist > TimeSpan.FromMinutes(1)) { store.Record(snapshot); lastPersist = snapshot.Timestamp; }
+            if (!updateVisuals) { recommender.Evaluate(snapshot, allGroups, Settings); return; }
+            ApplyFilter();
             if (snapshot.Timestamp - lastReview >= TimeSpan.FromSeconds(10))
             {
                 var key = SelectedReview?.AppKey;
                 Replace(BackgroundCandidates, BackgroundReview.Evaluate(allGroups, behaviour, snapshot.Timestamp));
                 SelectedReview = BackgroundCandidates.FirstOrDefault(c => c.AppKey == key); lastReview = snapshot.Timestamp;
             }
-            chart.Enqueue(snapshot.AvailablePercent); while (chart.Count > Math.Max(2, 60 / Settings.RefreshSeconds)) chart.Dequeue(); Chart = chart.ToArray();
-            if (snapshot.Timestamp - lastPersist > TimeSpan.FromMinutes(1)) { store.Record(snapshot); lastPersist = snapshot.Timestamp; }
+            Chart = chart.Select(point => point.Value).ToArray();
             foreach (var property in new[] { nameof(Available), nameof(Usable), nameof(Commit), nameof(CommitLimit), nameof(DiskFree), nameof(DiskDetail), nameof(UsedPercent), nameof(MemoryLabel), nameof(ProcessSummary), nameof(Chart), nameof(ChartCaption) }) Notify(property);
             UpdateRecommendations(); Status = $"อัปเดต {snapshot.Timestamp:HH:mm:ss} · ทำงานในเครื่อง · ไม่มีการส่ง process list ออกไป";
         }
@@ -242,7 +250,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     }
     private async Task InspectAsync()
     {
-        var group = SelectedGroup!; Page = 4; Status = "กำลังตรวจ signature แบบ offline…";
+        var group = SelectedGroup!; Page = 4; ReviewTab = 1; Status = "กำลังตรวจ signature แบบ offline…";
         var result = await Task.Run(() => new SignatureService().Inspect(group.Name, group.Path));
         Inspection = $"{result.Name}\n{result.Path}\n{result.SignatureLabel} · {result.Publisher}";
         var evidence = result.Evidence.Concat(behaviour.EvidenceFor(group.AppKey, DateTimeOffset.Now)).ToList();
@@ -275,7 +283,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         var recipe = SelectedRecipe!; Status = "กำลังสแกนเฉพาะ cache roots ที่กำหนด…";
         var result = await Task.Run(() => cache.Scan(recipe, actionCancellation!.Token)); Replace(CacheFiles, result.Files);
-        CacheSummary = $"{result.Files.Count:N0} ไฟล์ · {Format.Bytes(result.Bytes)} · ข้าม {result.Skipped.Count} รายการ{(result.Truncated ? " · ถึงขีดจำกัด 20,000 ไฟล์" : "")}\n{(cache.IsRunning(recipe) ? "แอปยังเปิดอยู่ ปิดแอปก่อนล้าง" : "เลือกไฟล์และตรวจ path ก่อนลบถาวร")}\nไม่รวม cookies, login, bookmarks, settings และเอกสาร";
+        CacheSummary = $"{result.Files.Count:N0} ไฟล์ · {Format.Bytes(result.Bytes)} · บันทึกที่ข้าม {result.Skipped.Count} รายการ{(result.Truncated ? " · ถึงขีดจำกัดการสแกน แสดงผลบางส่วน" : "")}\n{(cache.IsRunning(recipe) ? "แอปยังเปิดอยู่ ปิดแอปก่อนล้าง" : "เลือกไฟล์และตรวจ path ก่อนลบถาวร")}\nไม่รวม cookies, login, bookmarks, settings และเอกสาร";
         Status = "สแกนเสร็จ — ยังไม่มีการลบไฟล์";
     }
     private async Task CleanCacheAsync()
