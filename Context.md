@@ -22,12 +22,14 @@ The user resumed work on 2026-10-27. `docs/CHECKPOINT.md` preserves the historic
 - `tools/RamMx.Diagnostics`: read-only aggregate footprint benchmark; exports no process names/paths.
 - `scripts/build.ps1`: build/test/self-contained ZIP packaging.
 
+Boost RAM source: `Core/BoostPolicy.cs` owns sampled activity and exclusions; `Windows/BoostService.cs` coordinates fresh review, durable intent, mutation and restoration; `Windows/BoostProcessActions.cs` holds validated native handles; `App/MainViewModel.Boost.cs` owns preview, profile choices and measured results. Persistence adds `boost_restore` independently of removable history.
+
 Broker mode shares the app executable (`RamMx.exe --broker ...`) rather than a separate project. It accepts only ForceStop/DefenderScan, verifies the pipe peer, session, creation time, executable path, nonce, expiration and targets, then shows its own confirmation. No generic shell-command/file-delete endpoint. Same-user attackers are not comprehensively defeated by these checks: production requires signed binaries, protected installation ACLs and adversarial VM review.
 
 ## Invariants
 
 1. Available RAM, private working set, working set, commit and disk free differ. Preserve units and unavailable/partial coverage; do not sum shared working sets into physical usage.
-2. No default EmptyWorkingSet, standby purge, pagefile shrinking or registry cleaner.
+2. No default EmptyWorkingSet, standby purge, pagefile shrinking or registry cleaner. Boost may trim an explicitly approved, revalidated app once per session only when the user selects the non-persisted option. Never suspend arbitrary processes.
 3. Never choose a destructive target by name/PID alone. Match PID + creation time + path; reopen and recheck immediately before action.
 4. Critical/protected/OS/security/shared-runtime/unresolved groups fail closed. User trust/Keep cannot override hard policy.
 5. Graceful close never becomes force stop after timeout. Force requires separate confirmation.
@@ -38,7 +40,7 @@ Broker mode shares the app executable (`RamMx.exe --broker ...`) rather than a s
 10. Cleanup roots are compiled allowlisted recipes. Hold directory handles against rename/delete; reject reparse points/hard links; revalidate file ID/volume/size/write time; delete through the validated handle.
 11. No cleanup of documents, cookies, profiles, history, settings, databases, Windows Installer cache, WinSxS, WindowsApps, driver stores or shared runtimes.
 12. Cache deletion is permanent and separately confirmed. No promise of undo; quarantine would not count as disk reclaimed.
-13. Journal intent before mutation. Incomplete actions become UnknownOutcome at restart and are never replayed automatically.
+13. Journal intent before mutation. Incomplete actions become UnknownOutcome at restart and are never replayed automatically. Boost restoration is the exception for undoing a prior change: revalidate the exact process and restore only if its priority still equals the value RamMx applied. Never reapply Boost on restart.
 14. SQLite preferences do not authorize privileged execution. Bound imports and IPC payloads.
 15. No automatic uploads of files, hashes, process lists or logs. No LLM executes commands.
 
@@ -51,6 +53,12 @@ The review-candidates table refreshes every ten seconds with explanations for un
 Memory polling first uses PSAPI EX2/EX. When private working set is unavailable, a lazy PDH snapshot reads Process ID, Working Set, Working Set - Private and Private Bytes from Windows 11's Process V2 counterset in one collection using language-neutral paths. Its name:PID instances avoid legacy Process array name collisions. Exact instance joins, valid counter status, nonnegative values, unique PID and matching process name/PID suffix are required; duplicate array names are rejected. Memory provenance appears in process details. Queries/buffers are released each poll; failure never reuses old values. Performance data is display-only and does not supply action identity, trust, critical/protection status or stop permission. System/protected processes can remain unclassified when their image paths are inaccessible even when their RAM is readable. Values below 1 MiB use KiB/B to avoid rounding small resident sets to zero.
 
 System metric aggregates persist once per minute for seven days. Completed action history is bounded to 1,000 entries; unfinished/unknown outcomes are retained. Database size is checked before new destructive actions. SQLite uses WAL/checkpoints. Preferences survive without tray/startup.
+
+Boost observes foreground state, total CPU time, total I/O bytes and PID/creation-validated parentage. More than 2% of one logical CPU or 64 KiB/s I/O resets the observed idle interval; missing counters, a sampling gap over 90 seconds, clock reversal or a new process instance also reset it. The default is 15 minutes (5–120 configurable). Sampling is evidence of low activity, not proof that work is dispensable. An explicit per-profile allowlist and global Keep list precede fresh checks at execution. Workload ancestors/descendants are protected; ancestry must resolve to a verified Windows launcher. Unknown ownership fails closed, so some otherwise ordinary applications remain unavailable.
+
+Boost uses normal-user Get/SetProcessInformation with ProcessMemoryPriority=Low (2), leaving CPU priority unchanged. It saves the original priority in SQLite before each native change; failed journal writes prevent that target's mutation. Optional EmptyWorkingSet requires extra handle rights, runs once, and is never retried for a process already in the session. At most 100 requested targets / 200 pending restores are allowed. Exact PID + creation time + image path and current critical/protection state are rechecked on native handles. No elevated Boost path exists.
+
+Polling attempts restoration when activity resumes, eligibility is removed or the profile changes. Explicit end, normal process exit and next-start recovery also restore. Closing to tray is not exit. Restore failures remain pending and visible as a count; explicit restore exposes details and retries. External priority changes are preserved. Pending restore records survive history deletion/pruning; activity age and trim selection are not persisted. Available RAM before/after is a machine-wide observation, not attributed solely to Boost. The browser-help button is guidance only, with no extension, tab API or automatic settings changes.
 
 Recipes: Chrome/Edge profile Cache/Cache_Data, Code Cache, GPUCache; VS Code Cache/Cache_Data, CachedData, GPUCache, Code Cache; Discord/Slack Cache/Cache_Data, Code Cache, GPUCache. Browser profile directory patterns are restricted. A recipe does not imply all vendor versions have been tested.
 

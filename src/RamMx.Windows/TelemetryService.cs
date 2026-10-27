@@ -48,6 +48,7 @@ public sealed class TelemetryService
         var visiblePids = new HashSet<int>();
         Native.EnumWindows((window, _) => { if (Native.IsWindowVisible(window)) { Native.GetWindowThreadProcessId(window, out var owner); visiblePids.Add((int)owner); } return true; }, 0);
         var now = Stopwatch.GetTimestamp();
+        var parents = Native.Parents();
         IReadOnlyDictionary<int, PerformanceMemoryReader.Reading>? performanceMemory = null;
         foreach (var process in Process.GetProcesses())
         {
@@ -98,13 +99,15 @@ public sealed class TelemetryService
                     // Shared runtimes remain individually visible; a shared installation path does not establish workload ownership.
                     if (role == AppRole.SharedRuntime || role == AppRole.ServiceHost) key = $"runtime:{path}:{process.Id}:{creation}";
                     var identity = new ProcessIdentity(process.Id, creation, path, process.SessionId);
+                    ulong? ioBytes = !query.IsInvalid && Native.GetProcessIoCounters(query, out var io) ? io.ReadBytes + io.WriteBytes + io.OtherBytes : null;
                     var cpuTime = kernel + user; double cpu = 0;
                     if (previousCpu.TryGetValue(identity.InstanceKey, out var old) && now > old.Time)
                         cpu = Math.Clamp((cpuTime - old.Cpu) / 10000000d / ((now - old.Time) / (double)Stopwatch.Frequency) / Environment.ProcessorCount * 100, 0, 100);
                     previousCpu[identity.InstanceKey] = (cpuTime, now);
                     results.Add(new(identity, process.ProcessName, key, displayName, role, workingSet,
                         privateWorkingSet, commit, cpu, critical, protection,
-                        visiblePids.Contains(process.Id), process.Id == foreground, package, description, readable, memorySource));
+                        visiblePids.Contains(process.Id), process.Id == foreground, package, description, readable, memorySource,
+                        parents.TryGetValue(process.Id, out var parent) ? parent : null, creation > 0 ? cpuTime : null, ioBytes));
                 }
                 catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or System.NotSupportedException) { }
             }

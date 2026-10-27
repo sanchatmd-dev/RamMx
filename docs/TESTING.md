@@ -4,7 +4,7 @@ Test host: Windows 11 Home x64, .NET SDK 10.0.403. Results describe this host, n
 
 ## Automated checks
 
-`./scripts/build.ps1 -Publish` restores the solution, builds Release, runs xUnit integration tests and publishes a self-contained win-x64 ZIP. Local results on 2026-10-27: **87 passed, 0 failed, 0 skipped**. Release compilation: **0 warnings, 0 errors**. TRX output is in `tests/RamMx.Tests/TestResults/` and uploaded by CI.
+`./scripts/build.ps1 -Publish` restores the solution, builds Release, runs xUnit integration tests and publishes a self-contained win-x64 ZIP. Local results on 2026-10-27: **113 passed, 0 failed, 0 skipped**. Release compilation: **0 warnings, 0 errors**. TRX output is in `tests/RamMx.Tests/TestResults/` and uploaded by CI.
 
 Coverage includes:
 
@@ -58,6 +58,16 @@ Normal-user telemetry and the published UI now read private working set for winl
 The fallback uses Windows 11 Process V2. Legacy Process wildcard arrays can repeat instance names, which made name-based maps lose one same-name process. A regression test starts two disposable instances of the same fixture and requires both PID-specific readings; duplicate returned names fail closed. See Microsoft's [duplicate instance guidance](https://learn.microsoft.com/en-us/windows/win32/perfctrs/handling-duplicate-instance-names). Unavailable counters remain unavailable, and reading memory does not verify an inaccessible executable path.
 
 A post-fix footprint check with the process detail page visible (5 s warm-up, 61.37 s measured, 12 logical processors, 29 samples) observed 3.40% normalized app CPU, 60.10 MiB peak private working set and sampler median/p95 76.24/324.18 ms. A minimized check (10 s warm-up, 31.84 s measured, 15 samples) observed 0.102% CPU, 52.86 MiB peak private working set, handles 913→902 and sampler median/p95 72.92/556.90 ms. No UI automation calls ran during either interval. These short, different-view runs are not a controlled comparison with the earlier dashboard measurements: the visible CPU increase remains a profiling concern, and the earlier 0.336% visible result must not be treated as the footprint of this change.
+
+## Boost RAM — 2026-10-27
+
+Added 26 cases to the previous 87-test suite. Policy coverage includes explicit profile approval, Keep, continuous activity sampling, CPU/I/O/foreground resets, missing data, clock gaps/reversal, PID reuse, protected work ancestors/descendants, ambiguous ancestry and settings bounds. SQLite tests reopen restore intent and verify that clearing history cannot erase it.
+
+Native tests only modify disposable MemoryFixture processes: read/set memory priority, one-shot EmptyWorkingSet while the fixture remains alive, exact original-priority restoration, stale identity rejection, journal write failure before mutation, repeat-Boost suppression, foreground-triggered restoration and preservation of externally changed priority. Restore-journal removal failure retains the pending entry and succeeds on retry. Start-flow tests use a simulated quiet clock/history and desktop parent with the fixture's real native process identity; they do not establish 15 minutes of real-world inactivity for user applications.
+
+STA WPF tests cover Boost navigation, saved choices for closed apps, Keep/profile persistence, disabled execution without eligible targets, and startup restoration from a persisted priority-change record. Startup recovery is simulated by seeding that record and changing the fixture priority; it is not a power-loss test.
+
+The published native UI was inspected at approximately 1248 × 645 in the existing light theme: dashboard navigation, Boost table, protected Codex/Claude/ChatGPT/browser rows, 15-minute default, unchecked trim, disabled Start/Restore with no targets, and the browser guidance dialog. No real user app was boosted, trimmed, suspended or closed. Browser settings were not changed. No throughput improvement or amount of recovered RAM is claimed. Earlier footprint measurements above predate this feature and are not a benchmark of Boost.
 
 ## Remaining production gates
 

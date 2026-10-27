@@ -69,6 +69,55 @@ public sealed class StaApplicationFixture : IAsyncLifetime
 public sealed class ViewModelTests(StaApplicationFixture sta)
 {
     [Fact]
+    public Task Boost_navigation_preserves_profiles_and_never_enables_a_closed_app() => sta.RunAsync(async () =>
+    {
+        using var state = new IsolatedViewModel(); var vm = state.ViewModel;
+        const string key = @"file:C:\Apps\ClosedFixture\fixture.exe";
+        vm.Settings.BoostAllowedApps["ทั่วไป"] = [key];
+        await vm.SampleAsync();
+        vm.OpenBoostCommand.Execute(null); Assert.Equal(6, vm.Page);
+        var row = Assert.Single(vm.BoostRows, r => r.AppKey == key);
+        Assert.True(row.Allowed); Assert.False(row.Eligible); Assert.False(vm.BoostCommand.CanExecute(null));
+        Assert.False(vm.EndBoostCommand.CanExecute(null)); Assert.False(vm.BoostTrim);
+        row.Keep = true; Assert.Contains(key, vm.Settings.KeepApps);
+        vm.Profile = "ทำงาน";
+        Assert.Contains(key, vm.Settings.BoostAllowedApps["ทั่วไป"]);
+        Assert.DoesNotContain(vm.BoostRows, r => r.AppKey == key && r.Allowed);
+        vm.Profile = "ทั่วไป"; row = Assert.Single(vm.BoostRows, r => r.AppKey == key);
+        row.Allowed = false; Assert.DoesNotContain(key, vm.Settings.BoostAllowedApps["ทั่วไป"]);
+        using var saved = new RamMx.Persistence.StateStore(state.Root);
+        Assert.Contains(key, saved.Load().KeepApps);
+        Assert.Empty(state.Interaction.Messages);
+    });
+
+    [Fact]
+    public Task Startup_restores_a_recorded_fixture_priority_without_reapplying_boost() => sta.RunAsync(async () =>
+    {
+        string path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "MemoryFixture", "bin", "Release", "net10.0-windows", "MemoryFixture.exe"));
+        using var fixture = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path, "--background")
+        { UseShellExecute = false, WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden })!;
+        try
+        {
+            await Task.Delay(750);
+            var sample = new RamMx.Windows.TelemetryService().ReadProcesses().Single(p => p.Identity.Pid == fixture.Id);
+            using var handle = RamMx.Windows.BoostProcessActions.Open(sample.Identity);
+            uint original = RamMx.Windows.BoostProcessActions.ReadPriority(handle);
+            using var state = new IsolatedViewModel();
+            // Construct a fresh VM after simulating a crashed session's persisted restore intent.
+            using (var journal = new RamMx.Persistence.StateStore(state.Root))
+                journal.SaveBoost(new(sample.Identity, sample.Name, sample.AppKey, "ทั่วไป", original, 2));
+            RamMx.Windows.BoostProcessActions.SetPriority(handle, 2);
+            using var restarted = new MainViewModel(state.Interaction, state.Root);
+            await restarted.InitializeAsync();
+            Assert.Equal(original, RamMx.Windows.BoostProcessActions.ReadPriority(handle));
+            Assert.False(restarted.EndBoostCommand.CanExecute(null));
+            Assert.Contains("จบโหมด Boost", restarted.BoostResult);
+            Assert.Empty(state.Interaction.Messages);
+        }
+        finally { if (!fixture.HasExited) { fixture.Kill(); fixture.WaitForExit(3000); } }
+    });
+
+    [Fact]
     public Task Inspect_review_opens_evidence_tab_and_keeps_selected_identity() => sta.RunAsync(async () =>
     {
         using var state = new IsolatedViewModel();

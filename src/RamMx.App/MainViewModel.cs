@@ -29,7 +29,7 @@ public sealed class Command(Func<Task> action, Func<bool>? enabled = null) : ICo
     public async void Execute(object? parameter) { if (CanExecute(parameter)) await action(); }
 }
 
-public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
+public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
 {
     public event PropertyChangedEventHandler? PropertyChanged;
     private readonly StateStore store;
@@ -57,7 +57,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public BackgroundCandidate? SelectedReview { get => selectedReview; set { selectedReview = value; Notify(); CommandManager.InvalidateRequerySuggested(); } }
     public UserSettings Settings { get; }
     public bool Busy { get => busy; private set { busy = value; Notify(); CommandManager.InvalidateRequerySuggested(); } }
-    public int Page { get => page; set { page = value; Notify(); } }
+    public int Page { get => page; set { page = value; Notify(); if (value == 6) RefreshBoostRows(); } }
     private int reviewTab;
     public int ReviewTab { get => reviewTab; set { reviewTab = value; Notify(); } }
     public string Status { get => status; set { status = value; Notify(); } }
@@ -76,7 +76,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string ProcessSummary => $"{allGroups.Sum(g => g.Count)} processes · {allGroups.Count} กลุ่ม · RAM เฉพาะแอปที่อ่านได้ ไม่รวมส่วนแชร์";
     public double[] Chart { get; private set; } = [];
     public string ChartCaption => $"Available RAM (%) · {(chart.Count < 2 ? 0 : (int)(chart.Last().Time - chart.Peek().Time).TotalSeconds)} วินาทีล่าสุด · ยิ่งสูงยิ่งมี RAM พร้อมใช้";
-    public string Profile { get => Settings.Profile; set { Settings.Profile = value; SaveSettings(); Notify(); UpdateRecommendations(); } }
+    public string Profile { get => Settings.Profile; set { Settings.Profile = value; SaveSettings(); Notify(); UpdateRecommendations(); RefreshBoostRows(); } }
     public string Theme { get => Settings.Theme; set { Settings.Theme = value; App.SetTheme(value); SaveSettings(); Notify(); } }
     public int RefreshSeconds { get => Settings.RefreshSeconds; set { Settings.RefreshSeconds = value; SaveSettings(); Notify(); } }
     public bool MinimizeToTray { get => Settings.MinimizeToTray; set { Settings.MinimizeToTray = value; SaveSettings(); Notify(); } }
@@ -144,6 +144,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public MainViewModel(IInteraction interaction, string? stateDirectory = null)
     {
         this.interaction = interaction; store = new(stateDirectory); Settings = store.Load(); App.SetTheme(Settings.Theme);
+        InitializeBoost();
         bool CanAct() => !Busy && SelectedGroup is { CanStop: true };
         RefreshCommand = new Command(() => RunAsync(LoadInventoryAsync), () => !Busy);
         CloseCommand = new Command(() => StopAsync(false, false), CanAct);
@@ -174,7 +175,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         SelectedRecipe = Recipes[0]; RefreshHistory();
     }
 
-    public async Task InitializeAsync() => await RunAsync(LoadInventoryAsync);
+    public async Task InitializeAsync() => await RunAsync(async () => { await RecoverBoostAsync(); await LoadInventoryAsync(); });
     private async Task LoadInventoryAsync()
     {
         Status = "กำลังอ่านรายการติดตั้งและ startup…";
@@ -188,7 +189,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         await sampleGate.WaitAsync();
         try
         {
-            var data = await Task.Run(() => (telemetry.ReadMemory(), telemetry.ReadProcesses()));
+            var boostSettings = CopyBoostSettings();
+            var data = await Task.Run(() =>
+            {
+                var memory = telemetry.ReadMemory(); var processes = telemetry.ReadProcesses();
+                boost.Observe(processes, boostSettings, memory.Timestamp);
+                return (memory, processes);
+            });
             if (Busy && !force) return; // A command may have opened its confirmation while this sample was in flight.
             snapshot = data.Item1;
             allGroups = TelemetryService.Group(data.Item2, Settings); behaviour.Observe(snapshot.Timestamp, allGroups);
@@ -197,6 +204,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (snapshot.Timestamp - lastPersist > TimeSpan.FromMinutes(1)) { store.Record(snapshot); lastPersist = snapshot.Timestamp; }
             if (!updateVisuals) { recommender.Evaluate(snapshot, allGroups, Settings); return; }
             ApplyFilter();
+            if (Page == 6) RefreshBoostRows();
             if (snapshot.Timestamp - lastReview >= TimeSpan.FromSeconds(10))
             {
                 var key = SelectedReview?.AppKey;
@@ -332,5 +340,5 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private void RefreshHistory() => Replace(History, store.History());
     private static void Replace<T>(BulkObservableCollection<T> target, IEnumerable<T> source) => target.ReplaceAll(source);
     private void Notify([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-    public void Dispose() { SaveSettings(); actionCancellation?.Cancel(); store.Dispose(); }
+    public void Dispose() { SaveSettings(); actionCancellation?.Cancel(); try { boost.RestoreAll(); } finally { store.Dispose(); } }
 }

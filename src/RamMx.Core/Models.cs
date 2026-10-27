@@ -22,7 +22,7 @@ public sealed record ProcessIdentity(int Pid, long CreationFileTime, string Path
 public sealed record ProcessSample(ProcessIdentity Identity, string Name, string AppKey, string DisplayName,
     AppRole Role, ulong WorkingSet, ulong? PrivateWorkingSet, ulong PrivateCommit, double CpuPercent,
     bool? Critical, bool? Protected, bool HasWindow, bool IsForeground, string? PackageFullName, string Description, bool MemoryAvailable = true,
-    ProcessMemorySource MemorySource = ProcessMemorySource.ProcessApi)
+    ProcessMemorySource MemorySource = ProcessMemorySource.ProcessApi, int? ParentPid = null, long? TotalCpuTicks = null, ulong? IoBytes = null)
 {
     public bool CanStop => ActionPolicy.Evaluate(this).Allowed;
     public string MemorySourceLabel => !MemoryAvailable ? "อ่านไม่ได้" : MemorySource == ProcessMemorySource.PerformanceCounters ? "Windows Performance Counters" : "Windows Process API";
@@ -106,6 +106,8 @@ public sealed class UserSettings
     public double HighCommitPercent { get; set; } = 85;
     public HashSet<string> KeepApps { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, HashSet<string>> ProfileCandidates { get; set; } = new();
+    public Dictionary<string, HashSet<string>> BoostAllowedApps { get; set; } = new();
+    public int BoostIdleMinutes { get; set; } = 15;
     public double WindowWidth { get; set; } = 1280;
     public double WindowHeight { get; set; } = 830;
     public void Validate()
@@ -126,6 +128,10 @@ public sealed class UserSettings
             profiles[entry.Key] = new(entry.Value ?? [], StringComparer.OrdinalIgnoreCase);
         }
         ProfileCandidates = profiles;
+        BoostIdleMinutes = Math.Clamp(BoostIdleMinutes, 5, 120);
+        BoostAllowedApps ??= new();
+        if (BoostAllowedApps.Count > 30 || BoostAllowedApps.Any(p => p.Value?.Count > 1000)) throw new InvalidDataException("รายการ Boost ใหญ่เกินกำหนด");
+        BoostAllowedApps = BoostAllowedApps.ToDictionary(p => p.Key, p => new HashSet<string>(p.Value ?? [], StringComparer.OrdinalIgnoreCase));
         if (Profile is not ("ทั่วไป" or "ทำงาน" or "เล่นเกม")) Profile = "ทั่วไป";
         if (Theme is not ("Dark" or "Light")) Theme = "Dark";
     }

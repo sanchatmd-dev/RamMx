@@ -19,6 +19,21 @@ internal static class Native
         public ulong SharedCommit;
     }
     [StructLayout(LayoutKind.Sequential)] internal struct ProtectionInfo { public uint Level; }
+    [StructLayout(LayoutKind.Sequential)] internal struct MemoryPriorityInfo { public uint Priority; }
+    [StructLayout(LayoutKind.Sequential)] internal struct IoCounters { public ulong ReadOperations, WriteOperations, OtherOperations, ReadBytes, WriteBytes, OtherBytes; }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] internal struct ProcessEntry
+    {
+        public uint Size, Usage, Pid; public nuint Heap; public uint Module, Threads, ParentPid;
+        public int BasePriority; public uint Flags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string Exe;
+    }
+    [DllImport("kernel32.dll", SetLastError = true)] internal static extern SafeFileHandle CreateToolhelp32Snapshot(uint flags, uint pid);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool Process32First(SafeFileHandle snapshot, ref ProcessEntry entry);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool Process32Next(SafeFileHandle snapshot, ref ProcessEntry entry);
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GetProcessIoCounters(SafeProcessHandle process, out IoCounters counters);
+    [DllImport("kernel32.dll", EntryPoint = "GetProcessInformation", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GetMemoryPriority(SafeProcessHandle process, int infoClass, out MemoryPriorityInfo info, uint size);
+    [DllImport("kernel32.dll", EntryPoint = "SetProcessInformation", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool SetMemoryPriority(SafeProcessHandle process, int infoClass, ref MemoryPriorityInfo info, uint size);
+    [DllImport("psapi.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool EmptyWorkingSet(SafeProcessHandle process);
     [DllImport("psapi.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GetPerformanceInfo(out PerformanceInfo info, uint size);
     [DllImport("psapi.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GetProcessMemoryInfo(SafeProcessHandle process, ref MemoryCounters counters, uint size);
     [DllImport("kernel32.dll", SetLastError = true)] internal static extern SafeProcessHandle OpenProcess(uint access, bool inherit, int pid);
@@ -43,6 +58,15 @@ internal static class Native
     {
         var result = new StringBuilder(32768); uint length = (uint)result.Capacity;
         return QueryFullProcessImageName(process, 0, result, ref length) ? result.ToString() : "";
+    }
+    internal static IReadOnlyDictionary<int, int> Parents()
+    {
+        var result = new Dictionary<int, int>();
+        using var snapshot = CreateToolhelp32Snapshot(2, 0);
+        var entry = new ProcessEntry { Size = (uint)Marshal.SizeOf<ProcessEntry>(), Exe = "" };
+        if (!snapshot.IsInvalid && Process32First(snapshot, ref entry))
+            do { result[(int)entry.Pid] = (int)entry.ParentPid; } while (result.Count < 20000 && Process32Next(snapshot, ref entry));
+        return result;
     }
     internal static string? PackageName(SafeProcessHandle process)
     {
