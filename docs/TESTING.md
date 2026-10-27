@@ -4,7 +4,7 @@ Test host: Windows 11 Home x64, .NET SDK 10.0.403. Results describe this host, n
 
 ## Automated checks
 
-`./scripts/build.ps1 -Publish` restores the solution, builds Release, runs xUnit integration tests and publishes a self-contained win-x64 ZIP. Local results on 2026-10-27: **115 passed, 0 failed, 0 skipped**. Release compilation: **0 warnings, 0 errors**. TRX output is in `tests/RamMx.Tests/TestResults/` and uploaded by CI.
+`./scripts/build.ps1 -Publish` restores the solution, builds Release, runs xUnit integration tests and publishes a self-contained win-x64 ZIP. Local results on 2026-10-27: **117 passed, 0 failed, 0 skipped**. Release compilation: **0 warnings, 0 errors**. TRX output is in `tests/RamMx.Tests/TestResults/` and uploaded by CI.
 
 Coverage includes:
 
@@ -74,6 +74,29 @@ The published native UI was inspected at approximately 1248 × 645 in the existi
 A short visible Boost-page measurement after limiting inactive-table updates (5 s warm-up, 32.06 s measured, 12 logical processors) observed **5.46% normalized CPU**, **57.75 MiB peak private working set**, **95.36 MiB peak private commit**, handles **896→889**, and diagnostic sampler median/p95 **92.79/423.41 ms**. An earlier 30 s Boost run observed 7.07% CPU. These are uncontrolled measurements on a busy machine, with no UI automation calls during either interval; they do not prove the size of a performance improvement. Visible CPU remains a profiling concern. A separate sampled-thread-time trace showed waits and UI Automation dispatch, which does not establish CPU attribution.
 
 With the same app minimized, a later 5 s warm-up / 31.96 s measurement observed **0.51% normalized CPU**, **66.44 MiB peak private working set**, **106.28 MiB peak private commit**, handles **885→886**, sampler median/p95 **81.61/389.00 ms**. No UI automation calls occurred during measurement. This followed the diagnostic trace and was not an isolated cold-start benchmark. Minimizing reduces visual work while activity tracking/restoration continues; longer performance and leak investigations remain open.
+
+## Boost CPU investigation and correction — 2026-10-27
+
+**The earlier 5.46% figure must not be described as ordinary unattended Boost-page CPU.** The desktop inspection client remained connected even when no explicit tool calls ran. A new 30 s observation measured 4.82% with the connection present. Per-thread CPU deltas and sampled stacks localized most of that work to the UI thread and UI Automation dispatch; telemetry was a smaller contributor. Disconnecting the inspection session while leaving the same visible test window open changed a 5.47% observation to 0.55%. This is an observer effect, not a 90% improvement from changing application code. Accessibility was not disabled or filtered. A trial replacement table did not help under inspection and was discarded.
+
+The shipped change reuses the PDH query and its four counter handles, collects all RAM values anew each poll, and caches Boost label strings only until the next sample. The two-second visible refresh, CPU/I/O/foreground observation, protected-work policy, confirmation, native priority/trim actions and restoration paths are unchanged. Query failures discard both the query and failed result. Microsoft documents repeated collection on an existing [PDH query](https://learn.microsoft.com/en-us/windows/win32/perfctrs/collecting-performance-data); [PdhCollectQueryData](https://learn.microsoft.com/en-us/windows/win32/api/pdh/nf-pdh-pdhcollectquerydata) collects current counter values.
+
+Same-host passive comparison, visible Boost page, 12 logical processors, 5 s warm-up and approximately 60 s measured, with the inspection session explicitly disconnected before both measurements:
+
+| Build | Average normalized CPU |
+|---|---:|
+| Before: `feb5deb` | 0.404% |
+| After: reused PDH query + cached Boost labels | 0.286% |
+
+The after run recorded 30 samples, 99.89 MiB peak private commit and handles 895→880. Its 183.90 MiB peak total working set includes shared pages and is **not** private working set. The machine was running other workloads; these short sequential measurements are not a universal guarantee or an isolated benchmark. The observed code-change reduction is about 29%, separate from disconnecting the observer. A continuously inspecting accessibility client can still add CPU load.
+
+Use the passive script with the desired page visible; disconnect desktop inspection/automation tools first and record whether a screen reader remains active:
+
+```powershell
+./scripts/measure-cpu.ps1 -RamMxPid <PID> -DurationSeconds 60 -WarmupSeconds 5
+```
+
+The 117-test suite includes two new regression cases for concurrent readers sharing one query, reset/reopen, and cached labels refreshing when RAM changes or becomes unreadable. The existing native same-name fixture test now warms the query before spawning both processes, confirms their current independent values without reopening it, then confirms both disappear after exit. All previous native Boost priority, trim, journal and recovery tests also pass; no real user application was boosted or closed for these tests. The published native Boost page was inspected for current RAM, disabled protected targets and normal navigation.
 
 ## Remaining production gates
 

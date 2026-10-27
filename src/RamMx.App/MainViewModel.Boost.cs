@@ -10,22 +10,24 @@ public sealed class BoostRow : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
     private readonly Action<BoostRow, bool> changed;
     private bool allowed, keep;
+    private string ram, idle;
     public BoostAssessment Assessment { get; private set; }
     public string AppKey => Assessment.Group.AppKey;
     public string Name => Assessment.Group.Name;
-    public string Ram => Assessment.Group.RamLabel;
-    public string Idle => $"{Math.Floor(Assessment.Idle.TotalMinutes):0} นาที";
+    public string Ram => ram;
+    public string Idle => idle;
     public string Reason => Assessment.Reason;
     public bool CanAllow => Assessment.CanAllow;
     public bool Eligible => Assessment.Eligible;
     public bool Allowed { get => allowed; set { if (allowed == value) return; allowed = value; changed(this, false); } }
     public bool Keep { get => keep; set { if (keep == value) return; keep = value; changed(this, true); } }
     public BoostRow(BoostAssessment assessment, bool allowed, bool keep, Action<BoostRow, bool> changed)
-    { Assessment = assessment; this.allowed = allowed; this.keep = keep; this.changed = changed; }
+    { Assessment = assessment; ram = assessment.Group.RamLabel; idle = $"{Math.Floor(assessment.Idle.TotalMinutes):0} นาที"; this.allowed = allowed; this.keep = keep; this.changed = changed; }
     public void Update(BoostAssessment assessment, bool permitted, bool protectedApp)
     {
         var before = (Name, Ram, Idle, Reason, CanAllow, Eligible, allowed, keep);
         Assessment = assessment; allowed = permitted; keep = protectedApp;
+        ram = assessment.Group.RamLabel; idle = $"{Math.Floor(assessment.Idle.TotalMinutes):0} นาที";
         if (before.Name != Name) PropertyChanged?.Invoke(this, new(nameof(Name)));
         if (before.Ram != Ram) PropertyChanged?.Invoke(this, new(nameof(Ram)));
         if (before.Idle != Idle) PropertyChanged?.Invoke(this, new(nameof(Idle)));

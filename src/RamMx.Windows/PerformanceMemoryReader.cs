@@ -1,9 +1,10 @@
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace RamMx.Windows;
 
-// Reads memory gauges without opening other processes. A query belongs to one poll:
-// all four counters share the same collection, and no stale values survive a failure.
+// Reuse the four native counter handles, never their values. Each call collects a
+// fresh snapshot under one lock; failed collections discard the query and data.
 internal static class PerformanceMemoryReader
 {
     internal sealed record Reading(string Instance, ulong WorkingSet, ulong PrivateWorkingSet, ulong PrivateCommit);
@@ -11,24 +12,51 @@ internal static class PerformanceMemoryReader
     private const uint MoreData = 0x800007d2;
     private const uint LargeNoScale = 0x400 | 0x1000;
     private const int MaxBufferBytes = 16 * 1024 * 1024;
+    private static readonly object gate = new();
+    private static Query? current;
+    internal static int QueryOpenCount { get; private set; }
+    static PerformanceMemoryReader() => AppDomain.CurrentDomain.ProcessExit += (_, _) => Reset();
 
     internal static IReadOnlyDictionary<int, Reading> Read()
     {
-        if (PdhOpenQuery(null, 0, out var query) != 0) return new Dictionary<int, Reading>();
-        try
+        lock (gate)
         {
-            // Windows 11 Process V2 uses name:PID instances. Legacy Process array
-            // names can repeat without #ordinals and must not be joined by name.
+            current ??= Query.Create();
+            if (current == null) return new Dictionary<int, Reading>();
+            // These are instantaneous gauges, not rates requiring two samples.
+            if (PdhCollectQueryData(current.Handle) != 0) { Reset(); return new Dictionary<int, Reading>(); }
+            var arrays = current.Counters.Select(ReadArray).ToArray();
+            if (arrays.Any(a => a == null)) { Reset(); return new Dictionary<int, Reading>(); }
+            return Join(arrays[0]!, arrays[1]!, arrays[2]!, arrays[3]!);
+        }
+    }
+
+    internal static void Reset() { lock (gate) { current?.Dispose(); current = null; } }
+
+    private sealed class Query(SafePdhQueryHandle handle, nint[] counters) : IDisposable
+    {
+        internal SafePdhQueryHandle Handle { get; } = handle;
+        internal nint[] Counters { get; } = counters;
+        internal static Query? Create()
+        {
+            uint status = PdhOpenQuery(null, 0, out var handle);
+            if (status != 0) { handle?.Dispose(); return null; }
+            // Process V2 name:PID instances stay distinct, including processes
+            // created after the wildcard query was first opened.
             string[] names = ["Process ID", "Working Set", "Working Set - Private", "Private Bytes"];
             var counters = new nint[names.Length];
             for (int i = 0; i < names.Length; i++)
-                if (PdhAddEnglishCounter(query, @"\Process V2(*)\" + names[i], 0, out counters[i]) != 0)
-                    return new Dictionary<int, Reading>();
-            // These are instantaneous gauges, not rates requiring two samples.
-            if (PdhCollectQueryData(query) != 0) return new Dictionary<int, Reading>();
-            return Join(ReadArray(counters[0]), ReadArray(counters[1]), ReadArray(counters[2]), ReadArray(counters[3]));
+                if (PdhAddEnglishCounter(handle, @"\Process V2(*)\" + names[i], 0, out counters[i]) != 0) { handle.Dispose(); return null; }
+            QueryOpenCount++;
+            return new(handle, counters);
         }
-        finally { PdhCloseQuery(query); }
+        public void Dispose() => Handle.Dispose();
+    }
+
+    private sealed class SafePdhQueryHandle : SafeHandleZeroOrMinusOneIsInvalid
+    {
+        public SafePdhQueryHandle() : base(true) { }
+        protected override bool ReleaseHandle() => PdhCloseQuery(handle) == 0;
     }
 
     internal static Dictionary<int, Reading> Join(IReadOnlyDictionary<string, CounterValue> ids,
@@ -67,14 +95,14 @@ internal static class PerformanceMemoryReader
 
     private static bool Valid(CounterValue value) => value.Status is 0 or 1 && value.Value >= 0;
 
-    private static Dictionary<string, CounterValue> ReadArray(nint counter)
+    private static Dictionary<string, CounterValue>? ReadArray(nint counter)
     {
         var result = new Dictionary<string, CounterValue>(StringComparer.OrdinalIgnoreCase);
         // Retry a growing buffer by querying the size again, as required by PDH.
         for (int attempt = 0; attempt < 3; attempt++)
         {
             uint size = 0;
-            if (PdhGetFormattedCounterArray(counter, LargeNoScale, ref size, out _, 0) != MoreData || size == 0 || size > MaxBufferBytes) return result;
+            if (PdhGetFormattedCounterArray(counter, LargeNoScale, ref size, out _, 0) != MoreData || size == 0 || size > MaxBufferBytes) return null;
             var buffer = Marshal.AllocHGlobal((int)size);
             try
             {
@@ -82,7 +110,7 @@ internal static class PerformanceMemoryReader
                 uint status = PdhGetFormattedCounterArray(counter, LargeNoScale, ref size, out uint count, buffer);
                 if (status == MoreData) continue;
                 int stride = Marshal.SizeOf<CounterItem>();
-                if (status != 0 || size > allocated || count > allocated / stride) return result;
+                if (status != 0 || size > allocated || count > allocated / stride) return null;
                 for (int i = 0; i < count; i++)
                 {
                     var item = Marshal.PtrToStructure<CounterItem>(buffer + i * stride);
@@ -93,7 +121,7 @@ internal static class PerformanceMemoryReader
             }
             finally { Marshal.FreeHGlobal(buffer); }
         }
-        return result;
+        return null;
     }
 
     [StructLayout(LayoutKind.Explicit, Size = 16)]
@@ -103,9 +131,9 @@ internal static class PerformanceMemoryReader
         [FieldOffset(8)] public long LargeValue;
     }
     [StructLayout(LayoutKind.Sequential)] private struct CounterItem { public nint Name; public FormattedValue Value; }
-    [DllImport("pdh.dll", CharSet = CharSet.Unicode)] private static extern uint PdhOpenQuery(string? source, nuint userData, out nint query);
-    [DllImport("pdh.dll", CharSet = CharSet.Unicode)] private static extern uint PdhAddEnglishCounter(nint query, string path, nuint userData, out nint counter);
-    [DllImport("pdh.dll")] private static extern uint PdhCollectQueryData(nint query);
+    [DllImport("pdh.dll", CharSet = CharSet.Unicode)] private static extern uint PdhOpenQuery(string? source, nuint userData, out SafePdhQueryHandle query);
+    [DllImport("pdh.dll", CharSet = CharSet.Unicode)] private static extern uint PdhAddEnglishCounter(SafePdhQueryHandle query, string path, nuint userData, out nint counter);
+    [DllImport("pdh.dll")] private static extern uint PdhCollectQueryData(SafePdhQueryHandle query);
     [DllImport("pdh.dll")] private static extern uint PdhCloseQuery(nint query);
     [DllImport("pdh.dll", CharSet = CharSet.Unicode)] private static extern uint PdhGetFormattedCounterArray(nint counter, uint format, ref uint size, out uint count, nint items);
 }

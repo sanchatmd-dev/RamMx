@@ -89,12 +89,32 @@ public sealed class PerformanceMemoryTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task Warm_query_is_reused_serially_and_reset_reopens_it()
+    {
+        PerformanceMemoryReader.Reset(); int opened = PerformanceMemoryReader.QueryOpenCount;
+        try
+        {
+            var results = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => Task.Run(PerformanceMemoryReader.Read)));
+            Assert.All(results, snapshot => Assert.True(snapshot[Environment.ProcessId].PrivateWorkingSet > 0));
+            Assert.Equal(opened + 1, PerformanceMemoryReader.QueryOpenCount);
+            Assert.NotSame(results[0], results[1]); // Values belong to each collection, not a cached snapshot.
+            PerformanceMemoryReader.Reset();
+            Assert.True(PerformanceMemoryReader.Read()[Environment.ProcessId].PrivateCommit > 0);
+            Assert.Equal(opened + 2, PerformanceMemoryReader.QueryOpenCount);
+        }
+        finally { PerformanceMemoryReader.Reset(); }
+    }
+
+    [Fact]
     public async Task Two_live_processes_with_the_same_executable_name_have_distinct_memory()
     {
         var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "MemoryFixture", "bin", "Release", "net10.0-windows", "MemoryFixture.exe"));
         var fixtures = new List<Process>();
         try
         {
+            PerformanceMemoryReader.Reset();
+            _ = PerformanceMemoryReader.Read();
+            int opened = PerformanceMemoryReader.QueryOpenCount;
             for (int i = 0; i < 2; i++)
                 fixtures.Add(Process.Start(new ProcessStartInfo(path, "--background") { UseShellExecute = false, WindowStyle = ProcessWindowStyle.Hidden })!);
             await Task.Delay(1500);
@@ -106,6 +126,11 @@ public sealed class PerformanceMemoryTests(ITestOutputHelper output)
                 Assert.True(snapshot[fixture.Id].PrivateWorkingSet > 0);
             }
             Assert.NotEqual(snapshot[fixtures[0].Id].Instance, snapshot[fixtures[1].Id].Instance);
+            Assert.Equal(opened, PerformanceMemoryReader.QueryOpenCount);
+            foreach (var fixture in fixtures) { fixture.Kill(); fixture.WaitForExit(3000); }
+            var afterExit = PerformanceMemoryReader.Read();
+            foreach (var fixture in fixtures) Assert.DoesNotContain(fixture.Id, afterExit.Keys);
+            Assert.Equal(opened, PerformanceMemoryReader.QueryOpenCount);
         }
         finally
         {
@@ -114,6 +139,7 @@ public sealed class PerformanceMemoryTests(ITestOutputHelper output)
                 if (!fixture.HasExited) { fixture.Kill(); fixture.WaitForExit(3000); }
                 fixture.Dispose();
             }
+            PerformanceMemoryReader.Reset();
         }
     }
 

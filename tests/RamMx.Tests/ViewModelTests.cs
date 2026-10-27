@@ -119,6 +119,21 @@ public sealed class ViewModelTests(StaApplicationFixture sta)
     }
 
     [Fact]
+    public void Boost_labels_are_cached_between_samples_and_refresh_when_ram_becomes_unavailable()
+    {
+        var sample = BoostTests.App with { PrivateWorkingSet = 1024 };
+        var group = new ProcessGroup { AppKey = sample.AppKey, Name = sample.Name, Members = [sample] };
+        var row = new BoostRow(new(group, true, false, TimeSpan.Zero, "Waiting"), false, false, (_, _) => { });
+        Assert.Equal("1.0 KiB", row.Ram); Assert.Same(row.Ram, row.Ram); Assert.Same(row.Idle, row.Idle);
+        group = new ProcessGroup { AppKey = row.AppKey, Name = row.Name, Members = [sample with { PrivateWorkingSet = 64 * 1024 * 1024 }] };
+        row.Update(row.Assessment with { Group = group, Idle = TimeSpan.FromMinutes(16) }, true, false);
+        Assert.Equal("64.0 MiB", row.Ram); Assert.Equal("16 นาที", row.Idle);
+        group = new ProcessGroup { AppKey = row.AppKey, Name = row.Name, Members = [sample with { PrivateWorkingSet = null }] };
+        row.Update(row.Assessment with { Group = group }, true, false);
+        Assert.Equal("อ่านไม่ได้", row.Ram);
+    }
+
+    [Fact]
     public Task Startup_restores_a_recorded_fixture_priority_without_reapplying_boost() => sta.RunAsync(async () =>
     {
         string path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "MemoryFixture", "bin", "Release", "net10.0-windows", "MemoryFixture.exe"));
