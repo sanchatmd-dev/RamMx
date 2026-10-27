@@ -31,7 +31,10 @@ public sealed class BoostWindowsTests
             Assert.Equal(Environment.ProcessId, sample.ParentPid);
             Assert.NotNull(sample.IoBytes); Assert.NotNull(sample.TotalCpuTicks);
             using var handle = BoostProcessActions.Open(sample.Identity, true);
+            // Hosted runners may launch children with Low priority already; establish the fixture's test baseline.
+            BoostProcessActions.SetPriority(handle, 4);
             uint before = BoostProcessActions.ReadPriority(handle);
+            Assert.Equal(4u, before);
             var entry = new BoostEntry(sample.Identity, sample.Name, sample.AppKey, "ทั่วไป", before, 2);
             var journal = new Journal(); journal.SaveBoost(entry);
             BoostProcessActions.SetPriority(handle, 2); Assert.Equal(2u, BoostProcessActions.ReadPriority(handle));
@@ -56,6 +59,10 @@ public sealed class BoostWindowsTests
             for (int i = 0; i <= 300; i += 10) { now = BoostTests.Start.AddSeconds(i); service.Observe([BoostTests.Desktop, sample], settings, now); }
             var group = new ProcessGroup { AppKey = sample.AppKey, Name = sample.Name, Members = [sample] };
             using var handle = BoostProcessActions.Open(real.Identity);
+            BoostProcessActions.SetPriority(handle, 2);
+            Assert.Equal(OperationStatus.Partial, service.Start([group], settings, true).Status);
+            Assert.Empty(journal.Entries); // An already-low process is never trimmed or claimed by Boost.
+            BoostProcessActions.SetPriority(handle, 4);
             uint original = BoostProcessActions.ReadPriority(handle);
             journal.RejectWrites = true;
             Assert.Throws<IOException>(() => service.Start([group], settings, false));
@@ -81,6 +88,7 @@ public sealed class BoostWindowsTests
             await Task.Delay(750);
             var sample = new TelemetryService().ReadProcesses().Single(p => p.Identity.Pid == fixture.Id);
             using var handle = BoostProcessActions.Open(sample.Identity);
+            BoostProcessActions.SetPriority(handle, 4);
             uint original = BoostProcessActions.ReadPriority(handle);
             var journal = new Journal();
             var entry = new BoostEntry(sample.Identity, sample.Name, sample.AppKey, "ทั่วไป", original, 2);

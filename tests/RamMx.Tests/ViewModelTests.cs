@@ -91,6 +91,34 @@ public sealed class ViewModelTests(StaApplicationFixture sta)
     });
 
     [Fact]
+    public Task Boost_polling_leaves_other_tables_idle_and_navigation_refreshes_them() => sta.RunAsync(async () =>
+    {
+        using var state = new IsolatedViewModel(); var vm = state.ViewModel;
+        await vm.SampleAsync(); vm.Page = 6; vm.Groups.Clear();
+        var notifications = new List<string?>();
+        vm.PropertyChanged += (_, e) => notifications.Add(e.PropertyName);
+        await vm.SampleAsync();
+        Assert.Empty(vm.Groups); Assert.DoesNotContain(nameof(vm.Chart), notifications);
+        Assert.DoesNotContain(nameof(vm.Available), notifications);
+        vm.Page = 1;
+        Assert.Contains(vm.Groups, g => g.Members.Any(p => p.Identity.Pid == Environment.ProcessId));
+    });
+
+    [Fact]
+    public void Boost_row_only_notifies_changed_display_cells()
+    {
+        var sample = BoostTests.App;
+        var group = new ProcessGroup { AppKey = sample.AppKey, Name = sample.Name, Members = [sample] };
+        var assessment = new BoostAssessment(group, true, false, TimeSpan.Zero, "Waiting");
+        var row = new BoostRow(assessment, true, false, (_, _) => { });
+        var notifications = new List<string?>(); row.PropertyChanged += (_, e) => notifications.Add(e.PropertyName);
+        row.Update(assessment, true, false); Assert.Empty(notifications);
+        var updated = new ProcessGroup { AppKey = group.AppKey, Name = group.Name, Members = [sample with { PrivateWorkingSet = 32 * 1024 * 1024 }] };
+        row.Update(assessment with { Group = updated }, true, false);
+        Assert.Equal([nameof(BoostRow.Ram)], notifications);
+    }
+
+    [Fact]
     public Task Startup_restores_a_recorded_fixture_priority_without_reapplying_boost() => sta.RunAsync(async () =>
     {
         string path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "MemoryFixture", "bin", "Release", "net10.0-windows", "MemoryFixture.exe"));
@@ -101,6 +129,7 @@ public sealed class ViewModelTests(StaApplicationFixture sta)
             await Task.Delay(750);
             var sample = new RamMx.Windows.TelemetryService().ReadProcesses().Single(p => p.Identity.Pid == fixture.Id);
             using var handle = RamMx.Windows.BoostProcessActions.Open(sample.Identity);
+            RamMx.Windows.BoostProcessActions.SetPriority(handle, 4);
             uint original = RamMx.Windows.BoostProcessActions.ReadPriority(handle);
             using var state = new IsolatedViewModel();
             // Construct a fresh VM after simulating a crashed session's persisted restore intent.

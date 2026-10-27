@@ -57,7 +57,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
     public BackgroundCandidate? SelectedReview { get => selectedReview; set { selectedReview = value; Notify(); CommandManager.InvalidateRequerySuggested(); } }
     public UserSettings Settings { get; }
     public bool Busy { get => busy; private set { busy = value; Notify(); CommandManager.InvalidateRequerySuggested(); } }
-    public int Page { get => page; set { page = value; Notify(); if (value == 6) RefreshBoostRows(); } }
+    public int Page { get => page; set { bool leavingBoost = page == 6 && value != 6; page = value; Notify(); if (value == 6) RefreshBoostRows(); else if (leavingBoost) ApplyFilter(); } }
     private int reviewTab;
     public int ReviewTab { get => reviewTab; set { reviewTab = value; Notify(); } }
     public string Status { get => status; set { status = value; Notify(); } }
@@ -203,8 +203,14 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
             while (chart.Count > 61 || (chart.Count > 1 && snapshot.Timestamp - chart.Peek().Time > TimeSpan.FromSeconds(60))) chart.Dequeue();
             if (snapshot.Timestamp - lastPersist > TimeSpan.FromMinutes(1)) { store.Record(snapshot); lastPersist = snapshot.Timestamp; }
             if (!updateVisuals) { recommender.Evaluate(snapshot, allGroups, Settings); return; }
+            // Boost has its own rows. Updating inactive process tables/charts still raises WPF/UIA work.
+            if (Page == 6)
+            {
+                RefreshBoostRows(); recommender.Evaluate(snapshot, allGroups, Settings);
+                Status = $"อัปเดต {snapshot.Timestamp:HH:mm:ss} · ทำงานในเครื่อง · ไม่มีการส่ง process list ออกไป";
+                return;
+            }
             ApplyFilter();
-            if (Page == 6) RefreshBoostRows();
             if (snapshot.Timestamp - lastReview >= TimeSpan.FromSeconds(10))
             {
                 var key = SelectedReview?.AppKey;

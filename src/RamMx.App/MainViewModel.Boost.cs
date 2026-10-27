@@ -24,9 +24,16 @@ public sealed class BoostRow : INotifyPropertyChanged
     { Assessment = assessment; this.allowed = allowed; this.keep = keep; this.changed = changed; }
     public void Update(BoostAssessment assessment, bool permitted, bool protectedApp)
     {
-        string before = $"{Ram}|{Idle}|{Reason}|{CanAllow}|{Eligible}|{allowed}|{keep}";
+        var before = (Name, Ram, Idle, Reason, CanAllow, Eligible, allowed, keep);
         Assessment = assessment; allowed = permitted; keep = protectedApp;
-        if (before != $"{Ram}|{Idle}|{Reason}|{CanAllow}|{Eligible}|{allowed}|{keep}") PropertyChanged?.Invoke(this, new(null));
+        if (before.Name != Name) PropertyChanged?.Invoke(this, new(nameof(Name)));
+        if (before.Ram != Ram) PropertyChanged?.Invoke(this, new(nameof(Ram)));
+        if (before.Idle != Idle) PropertyChanged?.Invoke(this, new(nameof(Idle)));
+        if (before.Reason != Reason) PropertyChanged?.Invoke(this, new(nameof(Reason)));
+        if (before.CanAllow != CanAllow) PropertyChanged?.Invoke(this, new(nameof(CanAllow)));
+        if (before.Eligible != Eligible) PropertyChanged?.Invoke(this, new(nameof(Eligible)));
+        if (before.allowed != allowed) PropertyChanged?.Invoke(this, new(nameof(Allowed)));
+        if (before.keep != keep) PropertyChanged?.Invoke(this, new(nameof(Keep)));
     }
     public override string ToString() => Name;
 }
@@ -71,6 +78,7 @@ public sealed partial class MainViewModel
     private void RefreshBoostRows()
     {
         if (boost == null) return;
+        string beforeSummary = boostSummary;
         var settings = CopyBoostSettings();
         var allowed = settings.BoostAllowedApps.GetValueOrDefault(settings.Profile) ?? [];
         var plan = boost.Review(allGroups.SelectMany(g => g.Members).ToArray(), settings, DateTimeOffset.Now)
@@ -90,8 +98,10 @@ public sealed partial class MainViewModel
             if (rows.TryGetValue(item.Group.AppKey, out var existing)) existing.Update(item, permitted, keep);
             else BoostRows.Add(new(item, permitted, keep, ChangeBoostChoice));
         }
-        Notify(nameof(BoostSummary)); CommandManager.InvalidateRequerySuggested();
+        boostSummary = BoostSummary;
+        if (beforeSummary != boostSummary) { Notify(nameof(BoostSummary)); CommandManager.InvalidateRequerySuggested(); }
     }
+    private string boostSummary = "";
     private void ChangeBoostChoice(BoostRow row, bool keepChanged)
     {
         if (Busy) { RefreshBoostRows(); return; }

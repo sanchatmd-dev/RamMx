@@ -109,6 +109,7 @@ Settings export อาจมี paths และความชอบส่วน
 - Native uninstall ไม่ใช่ transaction ที่ย้อนคืน personal data ได้
 - Elevated broker, native MSI/MSIX mutation และ Defender remediation ต้องทดสอบเพิ่มเติมใน VM และกับ UAC จริงก่อนผ่าน production gates
 - ยังไม่มี 24-hour soak certification หรือ signed installer ผลวัดระยะสั้นไม่แทนการตรวจเหล่านี้
+- หน้า Boost ยังพบภาระ CPU เมื่อเปิดค้างไว้ในการวัดระยะสั้น แนะนำย่อหน้าต่างระหว่างทำงาน การติดตามและคืน priority ยังทำต่อ ดูตัวเลขและข้อจำกัดใน [TESTING.md](docs/TESTING.md)
 
 ## เอกสาร
 

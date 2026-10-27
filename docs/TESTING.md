@@ -4,7 +4,7 @@ Test host: Windows 11 Home x64, .NET SDK 10.0.403. Results describe this host, n
 
 ## Automated checks
 
-`./scripts/build.ps1 -Publish` restores the solution, builds Release, runs xUnit integration tests and publishes a self-contained win-x64 ZIP. Local results on 2026-10-27: **113 passed, 0 failed, 0 skipped**. Release compilation: **0 warnings, 0 errors**. TRX output is in `tests/RamMx.Tests/TestResults/` and uploaded by CI.
+`./scripts/build.ps1 -Publish` restores the solution, builds Release, runs xUnit integration tests and publishes a self-contained win-x64 ZIP. Local results on 2026-10-27: **115 passed, 0 failed, 0 skipped**. Release compilation: **0 warnings, 0 errors**. TRX output is in `tests/RamMx.Tests/TestResults/` and uploaded by CI.
 
 Coverage includes:
 
@@ -61,13 +61,19 @@ A post-fix footprint check with the process detail page visible (5 s warm-up, 61
 
 ## Boost RAM — 2026-10-27
 
-Added 26 cases to the previous 87-test suite. Policy coverage includes explicit profile approval, Keep, continuous activity sampling, CPU/I/O/foreground resets, missing data, clock gaps/reversal, PID reuse, protected work ancestors/descendants, ambiguous ancestry and settings bounds. SQLite tests reopen restore intent and verify that clearing history cannot erase it.
+Added 28 cases to the previous 87-test suite. Policy coverage includes explicit profile approval, Keep, continuous activity sampling, CPU/I/O/foreground resets, missing data, clock gaps/reversal, PID reuse, protected work ancestors/descendants, ambiguous ancestry and settings bounds. SQLite tests reopen restore intent and verify that clearing history cannot erase it.
 
 Native tests only modify disposable MemoryFixture processes: read/set memory priority, one-shot EmptyWorkingSet while the fixture remains alive, exact original-priority restoration, stale identity rejection, journal write failure before mutation, repeat-Boost suppression, foreground-triggered restoration and preservation of externally changed priority. Restore-journal removal failure retains the pending entry and succeeds on retry. Start-flow tests use a simulated quiet clock/history and desktop parent with the fixture's real native process identity; they do not establish 15 minutes of real-world inactivity for user applications.
 
 STA WPF tests cover Boost navigation, saved choices for closed apps, Keep/profile persistence, disabled execution without eligible targets, and startup restoration from a persisted priority-change record. Startup recovery is simulated by seeding that record and changing the fixture priority; it is not a power-loss test.
 
+The initial CI run exposed a test-environment assumption: hosted-runner children started with Low memory priority (2), while the local fixtures initially used Normal (5). Native tests now explicitly establish priority 4 for the disposable fixture before testing recovery, and also verify that an already-low target is skipped without a journal entry or trim. No production guard was relaxed. Additional regression tests require per-cell Boost notifications and no updates to inactive process tables/charts while Boost is visible; navigating back refreshes the process table.
+
 The published native UI was inspected at approximately 1248 × 645 in the existing light theme: dashboard navigation, Boost table, protected Codex/Claude/ChatGPT/browser rows, 15-minute default, unchecked trim, disabled Start/Restore with no targets, and the browser guidance dialog. No real user app was boosted, trimmed, suspended or closed. Browser settings were not changed. No throughput improvement or amount of recovered RAM is claimed. Earlier footprint measurements above predate this feature and are not a benchmark of Boost.
+
+A short visible Boost-page measurement after limiting inactive-table updates (5 s warm-up, 32.06 s measured, 12 logical processors) observed **5.46% normalized CPU**, **57.75 MiB peak private working set**, **95.36 MiB peak private commit**, handles **896→889**, and diagnostic sampler median/p95 **92.79/423.41 ms**. An earlier 30 s Boost run observed 7.07% CPU. These are uncontrolled measurements on a busy machine, with no UI automation calls during either interval; they do not prove the size of a performance improvement. Visible CPU remains a profiling concern. A separate sampled-thread-time trace showed waits and UI Automation dispatch, which does not establish CPU attribution.
+
+With the same app minimized, a later 5 s warm-up / 31.96 s measurement observed **0.51% normalized CPU**, **66.44 MiB peak private working set**, **106.28 MiB peak private commit**, handles **885→886**, sampler median/p95 **81.61/389.00 ms**. No UI automation calls occurred during measurement. This followed the diagnostic trace and was not an isolated cold-start benchmark. Minimizing reduces visual work while activity tracking/restoration continues; longer performance and leak investigations remain open.
 
 ## Remaining production gates
 
