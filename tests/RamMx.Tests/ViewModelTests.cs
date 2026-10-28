@@ -78,7 +78,7 @@ public sealed class ViewModelTests(StaApplicationFixture sta)
         vm.OpenBoostCommand.Execute(null); Assert.Equal(6, vm.Page);
         var row = Assert.Single(vm.BoostRows, r => r.AppKey == key);
         Assert.True(row.Allowed); Assert.False(row.Eligible); Assert.False(vm.BoostCommand.CanExecute(null));
-        Assert.False(vm.EndBoostCommand.CanExecute(null)); Assert.False(vm.BoostTrim);
+        Assert.False(vm.EndBoostCommand.CanExecute(null)); Assert.False(vm.LowerMemoryPriorityCommand.CanExecute(null));
         row.Keep = true; Assert.Contains(key, vm.Settings.KeepApps);
         vm.Profile = "ทำงาน";
         Assert.Contains(key, vm.Settings.BoostAllowedApps["ทั่วไป"]);

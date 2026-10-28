@@ -85,8 +85,8 @@
           </DataGrid.Columns></DataGrid>
           <StackPanel Grid.Row="3" Margin="0,12,0,0">
             <TextBlock Text="{Binding BoostSummary}" Margin="0,0,0,8"/>
-            <CheckBox IsChecked="{Binding BoostTrim}" Content="คืน working set เพิ่มหนึ่งครั้ง — กลับมาใช้อาจหน่วง และ RAM อาจเพิ่มกลับ" AutomationProperties.Name="คืน working set ครั้งเดียว" Margin="0,0,0,10"/>
-            <WrapPanel><Button Content="Boost RAM…" Command="{Binding BoostCommand}" Style="{StaticResource Primary}"/><Button Content="จบโหมด / คืน priority เดิม" Command="{Binding EndBoostCommand}"/><Button Content="วิธีพักแท็บเบราว์เซอร์" Command="{Binding BoostBrowserHelpCommand}"/></WrapPanel>
+            <TextBlock Text="Boost คืน working set ครั้งเดียว · กลับมาใช้อาจหน่วงและ RAM เพิ่มกลับ · ไม่วน trim อัตโนมัติ" TextWrapping="Wrap" Margin="0,0,0,10"/>
+            <WrapPanel><Button Content="Boost RAM — คืน working set…" Command="{Binding BoostCommand}" Style="{StaticResource Primary}"/><Button Content="ลด priority เท่านั้น…" Command="{Binding LowerMemoryPriorityCommand}"/><Button Content="จบโหมด / คืน priority เดิม" Command="{Binding EndBoostCommand}"/><Button Content="วิธีพักแท็บเบราว์เซอร์" Command="{Binding BoostBrowserHelpCommand}"/></WrapPanel>
           </StackPanel>
           <TextBox Grid.Row="4" Text="{Binding BoostResult, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="88" Margin="0,10,0,0" AutomationProperties.Name="ผล Boost RAM"/>
         </Grid></TabItem>

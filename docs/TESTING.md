@@ -4,7 +4,7 @@ Test host: Windows 11 Home x64, .NET SDK 10.0.403. Results describe this host, n
 
 ## Automated checks
 
-`./scripts/build.ps1 -Publish` restores the solution, builds Release, runs xUnit integration tests and publishes a self-contained win-x64 ZIP. Local results on 2026-10-27: **117 passed, 0 failed, 0 skipped**. Release compilation: **0 warnings, 0 errors**. TRX output is in `tests/RamMx.Tests/TestResults/` and uploaded by CI.
+`./scripts/build.ps1 -Publish` restores the solution, builds Release, runs xUnit integration tests and publishes a self-contained win-x64 ZIP. Local results on 2026-10-28: **124 passed, 0 failed, 0 skipped**. Release compilation: **0 warnings, 0 errors**. TRX output is in `tests/RamMx.Tests/TestResults/` and uploaded by CI.
 
 Coverage includes:
 
@@ -97,6 +97,26 @@ Use the passive script with the desired page visible; disconnect desktop inspect
 ```
 
 The 117-test suite includes two new regression cases for concurrent readers sharing one query, reset/reopen, and cached labels refreshing when RAM changes or becomes unreadable. The existing native same-name fixture test now warms the query before spawning both processes, confirms their current independent values without reopening it, then confirms both disappear after exit. All previous native Boost priority, trim, journal and recovery tests also pass; no real user application was boosted or closed for these tests. The published native Boost page was inspected for current RAM, disabled protected targets and normal navigation.
+
+## Measured one-shot Boost — 2026-10-28
+
+The previous live OneDrive priority-only experiment observed 3.18 → 3.18 MiB of private resident memory. A simultaneous +255 MiB change in machine Available RAM was not attributable to that process. This motivated the explicit primary **Boost RAM — คืน working set…** action; **ลด priority เท่านั้น…** remains separate. There is no automatic repeated trim, suspension, broad system purge or relaxation of workload protection.
+
+Native tests invoke the production Boost service and EmptyWorkingSet on a disposable MemoryFixture on this Windows machine. It allocates/touches 32 MiB of identifiable test data. Eligibility history and launcher parentage are simulated only for this fixture; memory samples, identity/protection checks, journal ordering, trimming and priority restoration use real native processes. These tests do not imply that an arbitrary user application qualifies for Boost.
+
+Observed private working sets in the first successful full run:
+
+| Initial priority | Before Boost (MiB) | Immediate after (MiB) | After 2 seconds (MiB) |
+|---|---:|---:|---:|
+| 1 | 37.70 | 1.20 | 1.67 |
+| 2 | 37.66 | 1.06 | 1.64 |
+| 4 | 37.66 | 0.00 | 1.94 |
+
+Approximately 35.7–36.0 MiB less private resident memory remained after two seconds. The fixture then read back every touched allocation page and verified all data was intact; it remained alive and its exact initial priority was restored. Immediate zero is a transient valid counter value, not a claim that an executing process consumes no resources. This measures resident-page reduction, not decommit, permanent free RAM or faster Codex/Claude throughput. On reuse, pages return to the working set. No user application's process was trimmed, suspended or terminated in these tests.
+
+Assertions require more than 8 MiB resident reduction immediately and after two seconds, complete data readback, exact restoration, and suppression of a second trim while a Boost entry remains pending. Initial Low/Very Low priorities are never raised. Persistent low-priority journal entries and measured history survive reopening. Fresh-review tests reject Codex/Claude/ChatGPT/browser/runtime names even if explicitly requested. Existing policy tests retain protection of work ancestors/descendants, Keep, unknown ancestry, OS/runtime roles, changed identities and activity.
+
+Measurement tests exclude processes not actually acted on, refuse to interpret exited/reused/unreadable targets as zero, display partial coverage, and report net increases honestly. Result history includes the target private-working-set summary independently of machine Available RAM. Published UI validation checks the separate primary trim/secondary priority commands and disabled execution without eligible targets. A short disposable fixture result is not a long-term paging or interactive-latency benchmark.
 
 ## Remaining production gates
 

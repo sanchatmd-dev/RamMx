@@ -43,17 +43,15 @@ public sealed class BoostRow : INotifyPropertyChanged
 public sealed partial class MainViewModel
 {
     private BoostService boost = null!;
-    private bool boostTrim;
-    private string boostResult = "ยังไม่ได้ Boost · การลด memory priority ให้ Windows เลือกคืน RAM เมื่อจำเป็น ไม่รับประกันยอด RAM ที่เพิ่ม";
+    private string boostResult = "ยังไม่ได้ Boost · ปุ่ม Boost คืน working set ครั้งเดียวให้แอปที่ผ่านเงื่อนไข แล้ววัด RAM เฉพาะเป้าหมายก่อน–หลัง";
     public BulkObservableCollection<BoostRow> BoostRows { get; } = [];
     public int[] BoostIdleOptions { get; } = [5, 15, 30, 60, 120];
     public int BoostIdleMinutes { get => Settings.BoostIdleMinutes; set { Settings.BoostIdleMinutes = value; SaveSettings(); Notify(); RefreshBoostRows(); } }
-    // Explicit per-run choice: do not persist or silently repeat a working-set trim.
-    public bool BoostTrim { get => boostTrim; set { boostTrim = value; Notify(); } }
     public string BoostResult { get => boostResult; private set { boostResult = value; Notify(); } }
     public string BoostSummary => $"พร้อม Boost {BoostRows.Count(r => r.Eligible)} แอป · รอคืนค่า {boost.PendingCount} process";
     public ICommand OpenBoostCommand { get; private set; } = null!;
     public ICommand BoostCommand { get; private set; } = null!;
+    public ICommand LowerMemoryPriorityCommand { get; private set; } = null!;
     public ICommand EndBoostCommand { get; private set; } = null!;
     public ICommand RefreshBoostCommand { get; private set; } = null!;
     public ICommand BoostBrowserHelpCommand { get; private set; } = null!;
@@ -62,7 +60,8 @@ public sealed partial class MainViewModel
     {
         boost = new BoostService(store, () => new TelemetryService { Inventory = telemetry.Inventory }.ReadProcesses());
         OpenBoostCommand = new Command(() => { Page = 6; return Task.CompletedTask; });
-        BoostCommand = new Command(() => RunAsync(StartBoostAsync), () => !Busy && BoostRows.Any(r => r.Eligible));
+        BoostCommand = new Command(() => RunAsync(() => StartBoostAsync(true)), () => !Busy && BoostRows.Any(r => r.Eligible));
+        LowerMemoryPriorityCommand = new Command(() => RunAsync(() => StartBoostAsync(false)), () => !Busy && BoostRows.Any(r => r.Eligible));
         EndBoostCommand = new Command(() => RunAsync(EndBoostAsync), () => !Busy && boost.PendingCount > 0);
         RefreshBoostCommand = new Command(() => RunAsync(() => SampleAsync(true)), () => !Busy);
         BoostBrowserHelpCommand = new Command(() =>
@@ -115,13 +114,13 @@ public sealed partial class MainViewModel
         }
         SaveSettings(); RefreshBoostRows();
     }
-    private async Task StartBoostAsync()
+    private async Task StartBoostAsync(bool trim)
     {
         await SampleAsync(true); RefreshBoostRows();
         var targets = BoostRows.Where(r => r.Eligible).Select(r => new ProcessGroup
         { AppKey = r.AppKey, Name = r.Name, Members = r.Assessment.Group.Members.ToArray() }).ToArray();
         if (targets.Length == 0) { BoostResult = "ยังไม่มีแอปที่ผ่านเงื่อนไข เลือกอนุญาตแล้วรอช่วงกิจกรรมต่ำ"; return; }
-        bool trim = BoostTrim; var settings = CopyBoostSettings();
+        var settings = CopyBoostSettings();
         if (!interaction.Confirm("Boost RAM — ตรวจรายการ", $"โปรไฟล์ {settings.Profile} · ไม่ใช้/กิจกรรมต่ำอย่างน้อย {settings.BoostIdleMinutes} นาที\n\n{string.Join("\n", targets.Select(g => $"• {g.Name} — {g.Count} process · {g.RamLabel}"))}\n\nลด memory priority ของรายการเหล่านี้ แอปยังทำงาน\n{(trim ? "เพิ่มการคืน working set ครั้งเดียว: เมื่อกลับมาใช้อาจหน่วง และ RAM อาจเพิ่มกลับ" : "ไม่ได้เลือก trim working set")}\n\nไม่ยืนยันว่าแอปไม่มีงานค้าง และไม่รับประกันจำนวน RAM ที่จะคืน\nกลับมาใช้แอป / เปลี่ยนโปรไฟล์ / จบโหมด / ปิด RamMx จะพยายามคืน priority เดิม")) return;
         var id = store.Begin("Boost RAM", string.Join(", ", targets.Select(g => g.Name)));
         var before = await Task.Run(telemetry.ReadMemory);
@@ -131,10 +130,10 @@ public sealed partial class MainViewModel
             await Task.Delay(1000);
             var after = await Task.Run(telemetry.ReadMemory);
             double change = ((double)after.Available - before.Available) / 1048576;
-            BoostResult = $"{result.Message}\nRAM พร้อมใช้ {Format.Bytes(before.Available)} → {Format.Bytes(after.Available)} ({change:+0.0;-0.0;0.0} MiB)\nเป็นการเปลี่ยนแปลงทั้งเครื่อง แอปอื่นมีผลร่วมด้วย\n{string.Join("\n", result.Details ?? [])}";
+            BoostResult = $"{result.Message}\n{result.BoostMemory?.Summary}\nRAM พร้อมใช้ทั้งเครื่อง {Format.Bytes(before.Available)} → {Format.Bytes(after.Available)} ({change:+0.0;-0.0;0.0} MiB) — แอปอื่นมีผลร่วมด้วย ไม่ใช่ยอดที่ Boost คืน\n{string.Join("\n", result.Details ?? [])}";
             Status = result.Message;
         }
-        finally { BoostTrim = false; RefreshBoostRows(); }
+        finally { RefreshBoostRows(); }
     }
     private async Task EndBoostAsync()
     {

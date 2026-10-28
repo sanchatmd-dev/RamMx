@@ -90,7 +90,7 @@ public sealed record Inspection(string Name, string Path, SignatureState Signatu
     public string SignatureLabel => Signature switch { SignatureState.Valid => "ตรวจสอบลายเซ็นได้", SignatureState.Unsigned => "ไม่มีลายเซ็น", SignatureState.Invalid => "ลายเซ็นไม่ผ่าน", _ => "ยังตรวจสอบไม่ได้" };
 }
 public sealed record Recommendation(string AppKey, string Title, string Reason, string Benefit, string Action);
-public sealed record ActionResult(OperationStatus Status, string Message, IReadOnlyList<string>? Details = null, int? NativeCode = null);
+public sealed record ActionResult(OperationStatus Status, string Message, IReadOnlyList<string>? Details = null, int? NativeCode = null, BoostMemoryReport? BoostMemory = null);
 public sealed record HistoryEntry(string Id, DateTimeOffset Timestamp, string Action, string Target, string Status, string Message);
 public sealed record StartupEntry(string Name, string Source, string Command, string Scope);
 

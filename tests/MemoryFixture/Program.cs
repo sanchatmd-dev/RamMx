@@ -18,6 +18,21 @@ internal static class Program
         allocation = new byte[32 * 1024 * 1024];
         for (int i = 0; i < allocation.Length; i += 4096) allocation[i] = 1;
         var app = new Application();
+        // Test-only handshake: prove trimmed pages can be read back without losing data.
+        int probeIndex = Array.IndexOf(args, "--probe");
+        if (probeIndex >= 0 && probeIndex + 1 < args.Length)
+        {
+            string probe = args[probeIndex + 1];
+            var check = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+            check.Tick += (_, _) =>
+            {
+                if (!System.IO.File.Exists(probe + ".request")) return;
+                check.Stop(); bool intact = true;
+                for (int i = 0; i < allocation.Length; i += 4096) intact &= allocation[i] == 1;
+                System.IO.File.WriteAllText(probe + ".result", intact ? "intact" : "corrupt");
+            };
+            check.Start();
+        }
         if (args.Contains("--background"))
         {
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;

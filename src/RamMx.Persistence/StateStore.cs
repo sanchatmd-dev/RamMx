@@ -67,7 +67,9 @@ public sealed class StateStore : IDisposable, IBoostJournal
         lock (gate)
         {
             using var command = connection.CreateCommand(); command.CommandText = "UPDATE history SET status=$status,message=$message WHERE id=$id";
-            command.Parameters.AddWithValue("$status", result.Status.ToString()); command.Parameters.AddWithValue("$message", result.Message + (result.Details?.Count > 0 ? "\n" + string.Join("\n", result.Details) : ""));
+            command.Parameters.AddWithValue("$status", result.Status.ToString()); command.Parameters.AddWithValue("$message", result.Message +
+                (result.BoostMemory == null ? "" : "\n" + result.BoostMemory.Summary) +
+                (result.Details?.Count > 0 ? "\n" + string.Join("\n", result.Details) : ""));
             command.Parameters.AddWithValue("$id", id); command.ExecuteNonQuery();
             Prune();
         }
@@ -128,7 +130,7 @@ public sealed class StateStore : IDisposable, IBoostJournal
     private static void ValidateBoost(BoostEntry entry)
     {
         if (entry.Identity == null || entry.Identity.Pid <= 0 || entry.Identity.CreationFileTime <= 0 || string.IsNullOrWhiteSpace(entry.Identity.Path) ||
-            entry.Identity.Path.Length > 4096 || !Path.IsPathFullyQualified(entry.Identity.Path) || entry.OriginalPriority is < 3 or > 5 || entry.AppliedPriority != 2)
+            entry.Identity.Path.Length > 4096 || !Path.IsPathFullyQualified(entry.Identity.Path) || entry.OriginalPriority is < 1 or > 5 || entry.AppliedPriority != Math.Min(entry.OriginalPriority, 2u))
             throw new InvalidDataException("ข้อมูลคืนค่า Boost ไม่ถูกต้อง");
     }
     public void RemoveBoost(string instanceKey)

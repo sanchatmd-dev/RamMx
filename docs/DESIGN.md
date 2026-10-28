@@ -45,7 +45,7 @@ Uninstall invokes the original installer/package mechanism and checks inventory.
 
 ## Boost RAM
 
-The default action lowers memory priority to Low (2) for explicitly allowed apps with continuously observed low activity. This gives Windows a preference when reclaiming pages; it does not allocate more RAM or promise immediate reclamation. See [SetProcessInformation](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-setprocessinformation).
+The primary explicit Boost action trims working sets once for approved apps with continuously observed low activity. It also lowers memory priority to min(original, Low=2). A separate priority-only command gives Windows a reclamation preference without requesting a trim. Neither command increases RAM capacity. See [SetProcessInformation](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-setprocessinformation).
 
 ```mermaid
 flowchart LR
@@ -53,15 +53,17 @@ flowchart LR
   Policy --> Preview[Observed idle interval + user confirmation]
   Preview --> Fresh[Fresh members and native identity checks]
   Fresh --> Journal[(Persist original priority)]
-  Journal --> Low[Set memory priority Low]
-  Low --> Trim[Optional one-shot working-set trim]
+  Journal --> Low[Lower priority only when above Low]
+  Low --> Trim[Primary Boost: one-shot working-set trim]
+  Trim --> Measure[Measure target private working set]
   Low --> Watch[Observe activity / profile / exit]
+  Measure --> Watch
   Watch --> Restore[Compare and restore original priority]
   Journal --> Recovery[Restart: restore only, never reapply]
   Recovery --> Restore
 ```
 
-The UI defaults to 15 minutes and keeps the trim option unchecked. [EmptyWorkingSet](https://learn.microsoft.com/en-us/windows/win32/api/psapi/nf-psapi-emptyworkingset) can remove resident pages but does not decommit the app's memory; reuse can cause paging and temporary latency. Original priority is recoverable, trimmed residency is not immediately reversible. Result text reports the machine's observed Available RAM change without claiming causal attribution.
+The UI defaults to 15 minutes and names the working-set action on the primary button and confirmation. [EmptyWorkingSet](https://learn.microsoft.com/en-us/windows/win32/api/psapi/nf-psapi-emptyworkingset) removes as many resident pages as possible but does not decommit the app's memory; reuse can cause paging and temporary latency. Original priority is recoverable, trimmed residency is not immediately reversible. A persisted entry prevents another trim of the same process during that Boost session, including targets already at priority 1/2. Fresh post-action telemetry compares private working sets only for exact identities actually acted on; missing values stay unavailable and partial coverage is explicit. Machine Available RAM is reported separately and is never presented as reclaimed RAM attributable to Boost.
 
 Codex/Claude/ChatGPT, browsers, development tools and their process relationships are protected. Native browser [Memory Saver](https://support.google.com/chrome/answer/12929150?hl=en) / [Sleeping tabs](https://support.microsoft.com/en-us/edge/learn-about-performance-features-in-microsoft-edge?form=M401RJ) are explained in a help dialog; RamMx does not automate them. Arbitrary suspension is excluded because it can stall locks and background work; [SuspendThread is intended primarily for debuggers](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-suspendthread).
 

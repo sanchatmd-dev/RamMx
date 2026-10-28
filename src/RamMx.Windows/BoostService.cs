@@ -51,7 +51,8 @@ public sealed class BoostService
             var fresh = readProcesses(); var now = clock();
             activity.Observe(now, fresh);
             var plan = BoostPolicy.Assess(fresh, settings, activity, now);
-            var details = new List<string>(); int changed = 0, trimmed = 0;
+            var details = new List<string>(); int changed = 0, trimmed = 0, completed = 0;
+            var actedOn = new HashSet<ProcessIdentity>();
             foreach (var requested in selected)
             {
                 if (cancellationToken.IsCancellationRequested) { details.Add("ยกเลิกเป้าหมายที่เหลือ; ค่าที่เปลี่ยนแล้วคืนได้ด้วยปุ่มจบโหมด"); break; }
@@ -67,22 +68,35 @@ public sealed class BoostService
                     {
                         using var handle = BoostProcessActions.Open(target.Identity, trim);
                         uint original = BoostProcessActions.ReadPriority(handle);
-                        if (original <= BoostProcessActions.LowPriority) { details.Add($"{target.Name}: priority ต่ำอยู่แล้ว ไม่เปลี่ยนค่า"); continue; }
-                        var entry = new BoostEntry(target.Identity, target.Name, target.AppKey, settings.Profile, original, BoostProcessActions.LowPriority);
+                        if (original <= BoostProcessActions.LowPriority && !trim) { details.Add($"{target.Name}: priority ต่ำอยู่แล้ว ไม่เปลี่ยนค่า"); continue; }
+                        var entry = new BoostEntry(target.Identity, target.Name, target.AppKey, settings.Profile, original, Math.Min(original, BoostProcessActions.LowPriority));
                         // Persist restore intent before touching the process; crash between either step is recoverable.
                         journal.SaveBoost(entry); pending.Add(entry.Identity.InstanceKey, entry);
                         if (BoostProcessActions.IsForeground(appPids)) { RestoreOne(entry); continue; }
-                        BoostProcessActions.SetPriority(handle, entry.AppliedPriority); changed++;
+                        if (original != entry.AppliedPriority)
+                        {
+                            BoostProcessActions.SetPriority(handle, entry.AppliedPriority); changed++; actedOn.Add(target.Identity);
+                        }
                         bool didTrim = false;
-                        if (trim && !BoostProcessActions.IsForeground(appPids)) { BoostProcessActions.Trim(handle); trimmed++; didTrim = true; }
+                        if (trim && !cancellationToken.IsCancellationRequested && !BoostProcessActions.IsForeground(appPids))
+                        { BoostProcessActions.Trim(handle); trimmed++; didTrim = true; actedOn.Add(target.Identity); }
+                        if (!trim || didTrim) completed++;
+                        else RestoreOne(entry);
                         details.Add($"{target.Name}: memory priority {original} → {entry.AppliedPriority}{(trim ? didTrim ? " · คืน working set หนึ่งครั้งแล้ว" : " · ข้าม trim เพราะแอปกลับมาใช้งาน" : "")}");
                     }
                     catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or StaleBoostTargetException)
                     { details.Add($"{target.Name}: ทำได้ไม่ครบ — {ex.Message}; ตรวจรายการคืนค่า"); }
                 }
             }
-            return new(changed == selected.Sum(g => g.Count) && (!trim || trimmed == changed) ? OperationStatus.Completed : OperationStatus.Partial,
-                $"ลด memory priority {changed} process · trim สำเร็จ {trimmed} process · ไม่มีการพักหรือปิดแอป", details);
+            IReadOnlyList<ProcessSample> after = [];
+            if (actedOn.Count > 0)
+            {
+                try { after = readProcesses(); }
+                catch (Exception ex) { details.Add($"อ่าน RAM หลังดำเนินการไม่ได้: {ex.Message}"); }
+            }
+            var memory = BoostMemoryReport.Capture(fresh, after, actedOn);
+            return new(completed == selected.Sum(g => g.Count) ? OperationStatus.Completed : OperationStatus.Partial,
+                $"ลด memory priority {changed} process · trim สำเร็จ {trimmed} process · ไม่มีการพักหรือปิดแอป", details, BoostMemory: memory);
         }
     }
     public ActionResult RestoreAll()
@@ -98,10 +112,10 @@ public sealed class BoostService
     {
         try
         {
-            if (entry.OriginalPriority is < 3 or > 5 || entry.AppliedPriority != BoostProcessActions.LowPriority) throw new InvalidOperationException("ข้อมูล priority ไม่ถูกต้อง");
+            if (entry.OriginalPriority is < 1 or > 5 || entry.AppliedPriority != Math.Min(entry.OriginalPriority, BoostProcessActions.LowPriority)) throw new InvalidOperationException("ข้อมูล priority ไม่ถูกต้อง");
             using var handle = BoostProcessActions.Open(entry.Identity);
             var current = BoostProcessActions.ReadPriority(handle);
-            if (current == entry.AppliedPriority) BoostProcessActions.SetPriority(handle, entry.OriginalPriority);
+            if (current == entry.AppliedPriority && current != entry.OriginalPriority) BoostProcessActions.SetPriority(handle, entry.OriginalPriority);
             journal.RemoveBoost(entry.Identity.InstanceKey); pending.Remove(entry.Identity.InstanceKey);
             return $"{entry.Name}: {(current == entry.AppliedPriority ? "คืน priority เดิมแล้ว" : "ค่าเปลี่ยนจากภายนอกแล้ว ไม่เขียนทับ")}";
         }
